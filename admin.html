@@ -791,6 +791,9 @@ Answer: A" class="w-full bg-slate-950 border border-slate-700 rounded-2xl p-3.5 
                 </div>
 
                 <button type="button" onclick="saveSiteBroadcastSettings()" class="w-full emerald-btn py-3 rounded-xl text-xs sm:text-sm shadow-lg">🔔 حفظ وتحديث النصوص وموعد الاختبار في موقع الطلاب</button>
+				<div class="pt-3 border-t border-slate-700">
+                    <button type="button" id="opt-db-btn" onclick="optimizeExistingCloudDatabase()" class="w-full cyan-pill py-2.5 rounded-xl text-xs text-amber-300 border-amber-500/40">⚡ ضغط الصور وتفعيل الكاش الذكي (Version Check)</button>
+                </div>
             </div>
         </section>
 
@@ -1779,6 +1782,7 @@ Answer: A" class="w-full bg-slate-950 border border-slate-700 rounded-2xl p-3.5 
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(subjectsConfig)
                 });
+				await bumpCloudVersion('subjects');
                 showToast('✅ تم حفظ المواد وحالات الإخفاء/الإظهار ومزامنة الـ Checklist والتدريب المخصص!', 'green');
             } catch (e) {
                 showToast('⚠️ تم الحفظ محلياً فقط، تحقق من الإنترنت.', 'gold');
@@ -3624,14 +3628,97 @@ const BADGE_PRESET_OPTIONS = [
             } catch (e) {}
         }
 
-        // ================= 11. النشر السحابي وبنك الأسئلة والإعدادات =================
+       // ================= 11. النشر السحابي المحسّن (ضغط الصور + منع رفع fullSlideImage + Version Check) =================
+        async function bumpCloudVersion(key) {
+            try {
+                await fetch(`${FIREBASE_BASE_URL}/content/version/${key}.json`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Date.now())
+                });
+            } catch (e) {}
+        }
+
+        async function compressDataUrlForCloud(dataUrl, maxWidth = 850, quality = 0.72) {
+            if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return dataUrl || '';
+            if (dataUrl.length < 45000 && dataUrl.startsWith('data:image/webp')) return dataUrl;
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const scale = img.width > maxWidth ? (maxWidth / img.width) : 1;
+                        const c = document.createElement('canvas');
+                        c.width = Math.max(1, Math.round(img.width * scale));
+                        c.height = Math.max(1, Math.round(img.height * scale));
+                        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                        let out = c.toDataURL('image/webp', quality);
+                        if (!out.startsWith('data:image/webp')) out = c.toDataURL('image/jpeg', quality);
+                        resolve(out.length < dataUrl.length ? out : dataUrl);
+                    } catch (e) { resolve(dataUrl); }
+                };
+                img.onerror = () => resolve(dataUrl);
+                img.src = dataUrl;
+            });
+        }
+
+        async function prepareStationForCloud(st) {
+            const clean = { ...st };
+            // عدم رفع صورة الشريحة الكاملة إلى Firebase لأنها تستهلك أضعاف المساحة بلا حاجة
+            delete clean.fullSlideImage;
+            if (clean.customImage && clean.customImage.startsWith('data:image/')) {
+                clean.customImage = await compressDataUrlForCloud(clean.customImage, 850, 0.72);
+            }
+            return clean;
+        }
+
+        async function prepareStationsListForCloud(list) {
+            const out = [];
+            for (const item of (Array.isArray(list) ? list : [])) {
+                if (item && item.id) out.push(await prepareStationForCloud(item));
+            }
+            return out;
+        }
+
+        async function optimizeExistingCloudDatabase() {
+            const btn = document.getElementById('opt-db-btn');
+            if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري ضغط وتنظيف قاعدة البيانات...'; }
+            try {
+                const res = await fetch(`${FIREBASE_BASE_URL}/content/stations.json?t=${Date.now()}`, { cache: 'no-store' });
+                const cloudList = res.ok ? await res.json() : [];
+                let savedMsg = 'تم تفعيل نظام Version Check بنجاح!';
+                if (Array.isArray(cloudList) && cloudList.length > 0) {
+                    const beforeKB = Math.round(JSON.stringify(cloudList).length / 1024);
+                    const cleaned = await prepareStationsListForCloud(cloudList);
+                    const afterKB = Math.round(JSON.stringify(cleaned).length / 1024);
+                    localStorage.setItem('med26_dynamic_stations', JSON.stringify(cleaned));
+                    await fetch(`${FIREBASE_BASE_URL}/content/stations.json`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(cleaned)
+                    });
+                    savedMsg = `✅ تم تقليص حجم الأسئلة من ${beforeKB} KB إلى ${afterKB} KB وتفعيل الكاش الذكي!`;
+                }
+                const now = Date.now();
+                await fetch(`${FIREBASE_BASE_URL}/content/version.json`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stations: now, subjects: now, settings: now })
+                });
+                showToast(savedMsg, 'green');
+            } catch (e) {
+                showToast('❌ حدث خطأ أثناء الضغط، تأكد من الاتصال بالإنترنت.', 'red');
+            } finally {
+                if (btn) { btn.disabled = false; btn.innerText = '⚡ ضغط الصور وتفعيل الكاش الذكي (Version Check)'; }
+            }
+        }
+
         async function publishAllDrafts() {
             if (!draftStations.length) return;
             const btn = document.getElementById('publish-btn');
-            btn.disabled = true; btn.innerText = '⏳ جاري النشر...';
+            btn.disabled = true; btn.innerText = '⏳ جاري الضغط والنشر...';
 
             let maxId = questionsDB.reduce((m, q) => Math.max(m, q.id || 0), 1000);
-            const toPublish = [...draftStations].map(st => {
+            const rawPublish = [...draftStations].map(st => {
                 maxId++;
                 return {
                     id: maxId, subject: st.subject, lab: st.lab, track: st.track || activeTrack,
@@ -3639,17 +3726,20 @@ const BADGE_PRESET_OPTIONS = [
                     category: st.category, type: st.type, highYield: !!st.highYield, hideAiViva: false,
                     noSample: !st.customImage, q: st.q, a: plainTextAnswerToHtml(st.plainA),
                     options: st.options || [], correct: st.correct || 0, note: st.note || '',
-                    customImage: st.customImage || '', fullSlideImage: st.fullSlideImage || st.customImage || '',
+                    customImage: st.customImage || '',
                     page: maxId, slot: 0
                 };
             });
 
+            const toPublish = await prepareStationsListForCloud(rawPublish);
+
             let dyn = [];
             try { dyn = JSON.parse(localStorage.getItem('med26_dynamic_stations') || '[]'); } catch (e) {}
-            const combined = [...dyn, ...toPublish];
+            const combined = await prepareStationsListForCloud([...dyn, ...toPublish]);
             localStorage.setItem('med26_dynamic_stations', JSON.stringify(combined));
             try {
                 await fetch(`${FIREBASE_BASE_URL}/content/stations.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(combined) });
+                await bumpCloudVersion('stations');
             } catch (e) {}
 
             toPublish.forEach(q => questionsDB.push(q));
@@ -3657,17 +3747,22 @@ const BADGE_PRESET_OPTIONS = [
             renderDrafts();
             renderQuestionBankList();
             btn.disabled = false; btn.innerText = '🚀 اعتماد ونشر';
-            showToast(`🎉 تم نشر ${toPublish.length} سؤال في (${activeTrack === 'theory' ? 'قسم النظري' : 'قسم العملي'}) بنجاح!`, 'green');
+            showToast(`🎉 تم ضغط ونشر ${toPublish.length} سؤال في (${activeTrack === 'theory' ? 'قسم النظري' : 'قسم العملي'}) بنجاح!`, 'green');
         }
 
         async function persistStationToCloud(stationObj) {
+            const cleanObj = await prepareStationForCloud(stationObj);
+            Object.assign(stationObj, cleanObj);
+            delete stationObj.fullSlideImage;
             let dyn = [];
             try { dyn = JSON.parse(localStorage.getItem('med26_dynamic_stations') || '[]'); } catch (e) {}
-            const idx = dyn.findIndex(item => item.id === stationObj.id);
-            if (idx !== -1) dyn[idx] = stationObj; else dyn.push(stationObj);
-            localStorage.setItem('med26_dynamic_stations', JSON.stringify(dyn));
+            const idx = dyn.findIndex(item => item.id === cleanObj.id);
+            if (idx !== -1) dyn[idx] = cleanObj; else dyn.push(cleanObj);
+            const cleanedAll = await prepareStationsListForCloud(dyn);
+            localStorage.setItem('med26_dynamic_stations', JSON.stringify(cleanedAll));
             try {
-                await fetch(`${FIREBASE_BASE_URL}/content/stations.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dyn) });
+                await fetch(`${FIREBASE_BASE_URL}/content/stations.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cleanedAll) });
+                await bumpCloudVersion('stations');
             } catch (e) {}
         }
 
@@ -3729,6 +3824,7 @@ const BADGE_PRESET_OPTIONS = [
                 dyn = dyn.filter(q => q.id !== id);
                 localStorage.setItem('med26_dynamic_stations', JSON.stringify(dyn));
                 await fetch(`${FIREBASE_BASE_URL}/content/stations.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dyn) });
+				await bumpCloudVersion('stations');
             } catch (e) {}
             renderQuestionBankList();
             showToast('🗑️ تم حذف المحطة من بنك الأسئلة.', 'red');
@@ -3802,6 +3898,7 @@ const BADGE_PRESET_OPTIONS = [
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(nextSettings)
                 });
+				await bumpCloudVersion('settings');
                 showToast(`🔔 تم حفظ وتحديث نصوص وموعد الاختبار لـ (${activeTrack === 'theory' ? 'قسم النظري' : 'قسم العملي'}) فوراً!`, 'green');
             } catch (e) {
                 showToast('❌ تعذر الحفظ في Firebase، تحقق من اتصالك بالإنترنت.', 'red');
