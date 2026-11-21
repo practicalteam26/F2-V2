@@ -1,0 +1,117 @@
+/* ================= الهوية البصرية الحمراء لفريق تجميعات النظري (MED26 Theory) ================= */
+body[data-track="theory"] {
+    --bg-main: #160709 !important;
+    --bg-secondary: #240b10 !important;
+    --bg-card: #2c0e14 !important;
+    --text-main: #fff5f6 !important;
+    --text-muted: #e5b8be !important;
+    --gold-bright: #ffffff !important;
+    --gold-primary: #dc2638 !important;
+    --border-color: rgba(239, 68, 68, 0.38) !important;
+    --watermark-opacity: 0.06 !important;
+    background-color: #160709 !important;
+    background-image:
+        radial-gradient(circle at 12% 10%, rgba(185, 28, 40, 0.34) 0%, transparent 50%),
+        radial-gradient(circle at 88% 85%, rgba(136, 19, 32, 0.30) 0%, transparent 55%) !important;
+    background-attachment: fixed !important;
+}
+
+body[data-track="theory"].light-mode {
+    --bg-main: #fff5f6 !important;
+    --bg-secondary: #fde8eb !important;
+    --bg-card: #ffffff !important;
+    --text-main: #2a0a0f !important;
+    --text-muted: #7f2d38 !important;
+    --gold-bright: #991b1b !important;
+    --gold-primary: #c81e2b !important;
+    --border-color: rgba(200, 30, 43, 0.32) !important;
+    background-color: #fff5f6 !important;
+    background-image:
+        radial-gradient(circle at 12% 10%, rgba(225, 29, 72, 0.08) 0%, transparent 50%),
+        radial-gradient(circle at 88% 85%, rgba(185, 28, 40, 0.06) 0%, transparent 55%) !important;
+}
+
+body[data-track="theory"] .app-card {
+    background-color: #260c11 !important;
+    border-color: rgba(225, 29, 72, 0.38) !important;
+    box-shadow: 0 12px 30px -8px rgba(0, 0, 0, 0.55) !important;
+}
+body[data-track="theory"].light-mode .app-card {
+    background-color: #ffffff !important;
+    border-color: rgba(200, 30, 43, 0.28) !important;
+}
+
+body[data-track="theory"] .gold-btn {
+    background: linear-gradient(135deg, #e11d38 0%, #991b1b 100%) !important;
+    color: #ffffff !important;
+    box-shadow: 0 6px 18px rgba(225, 29, 72, 0.35) !important;
+}
+body[data-track="theory"] .gold-btn:hover,
+body[data-track="theory"] .gold-btn:active {
+    background: linear-gradient(135deg, #f43f5e 0%, #b91c1c 100%) !important;
+    color: #ffffff !important;
+}
+
+body[data-track="theory"] .pill-btn {
+    background-color: var(--bg-secondary) !important;
+    border-color: rgba(225, 29, 72, 0.36) !important;
+    color: var(--text-main) !important;
+}
+body[data-track="theory"] .pill-btn:hover,
+body[data-track="theory"] .pill-btn.active {
+    background: linear-gradient(135deg, #e11d38 0%, #991b1b 100%) !important;
+    color: #ffffff !important;
+    border-color: transparent !important;
+}
+
+body[data-track="theory"] .kw-highlight {
+    background: rgba(225, 29, 72, 0.24) !important;
+    color: #ffffff !important;
+    border-color: rgba(244, 63, 94, 0.55) !important;
+}
+body[data-track="theory"].light-mode .kw-highlight {
+    background: rgba(225, 29, 72, 0.12) !important;
+    color: #9f1239 !important;
+}
+
+body[data-track="theory"] .gamemode-card {
+    background: linear-gradient(145deg, #321017 0%, #1d080c 100%) !important;
+    border-color: rgba(225, 29, 72, 0.42) !important;
+}
+body[data-track="theory"].light-mode .gamemode-card {
+    background: linear-gradient(145deg, #ffffff 0%, #fff1f2 100%) !important;
+}
+
+body[data-track="theory"] .fog-top-spotlight { background: radial-gradient(ellipse at 50% 0%, rgba(225, 29, 72, 0.30) 0%, rgba(153, 27, 27, 0.14) 48%, transparent 76%) !important; }
+body[data-track="theory"] .fog-cloud-right { background: radial-gradient(ellipse at center, rgba(185, 28, 40, 0.22) 0%, transparent 72%) !important; }
+body[data-track="theory"] .fog-cloud-left { background: radial-gradient(ellipse at center, rgba(159, 18, 57, 0.20) 0%, transparent 74%) !important; }
+body[data-track="theory"] .fog-bottom-glow { background: radial-gradient(ellipse at 50% 100%, rgba(225, 29, 72, 0.24) 0%, transparent 76%) !important; }
+
+body[data-track="theory"] .footer-marquee-wrap {
+    background: linear-gradient(90deg, #1b080b 0%, #450f18 50%, #1b080b 100%) !important;
+    border-color: rgba(225, 29, 72, 0.45) !important;
+}
+body[data-track="theory"].light-mode .footer-marquee-wrap {
+    background: linear-gradient(90deg, #ffe4e6 0%, #fecdd3 50%, #ffe4e6 100%) !important;
+}
+
+body[data-track="theory"] .ai-msg-bubble { background: rgba(225, 29, 72, 0.14) !important; border-color: rgba(244, 63, 94, 0.45) !important; }
+body[data-track="theory"] #luxury-score-card { background: linear-gradient(145deg, #4c0d16 0%, #1e070b 55%, #3d0b14 100%) !important; border-color: #f43f5e !important; }
+body[data-track="theory"] #report-score-20 { color: #ffffff !important; }
+body[data-track="theory"].med26-zen-mode { background-color: #0e0406 !important; }
+
+/* النصوص البيضاء في الوضع الداكن للنظري */
+body[data-track="theory"]:not(.light-mode) .text-amber-200,
+body[data-track="theory"]:not(.light-mode) .text-amber-300,
+body[data-track="theory"]:not(.light-mode) .text-amber-400,
+body[data-track="theory"]:not(.light-mode) .text-orange-300,
+body[data-track="theory"]:not(.light-mode) .text-orange-400,
+body[data-track="theory"]:not(.light-mode) [class*="text-[var(--gold-bright)]"],
+body[data-track="theory"]:not(.light-mode) [class*="text-[#ebd2a4]"] {
+    color: #ffffff !important;
+}
+body[data-track="theory"]:not(.light-mode) .st-nav-box.nav-current {
+    border-color: #ffffff !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35) !important;
+}
