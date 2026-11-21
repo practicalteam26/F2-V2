@@ -1313,7 +1313,11 @@
         if (IS_THEORY) applyTheoryVisualAndTerminologyPass();
     }
 
+    let _cloudSyncStarted = false;
     async function syncEverythingFromCloud() {
+        if (_cloudSyncStarted) return;
+        _cloudSyncStarted = true;
+
         try { mergeDynamicStationsInPlace(JSON.parse(localStorage.getItem('med26_dynamic_stations') || '[]')); } catch (e) {}
         try {
             const localSet = JSON.parse(localStorage.getItem('med26_site_settings_cache') || 'null');
@@ -1325,33 +1329,54 @@
         } catch (e) {}
 
         try {
+            // فحص ملف النسخة الخفيف أولاً (~60 بايت) بدلاً من تحميل كل البيانات في كل زيارة
+            let cloudVer = null;
+            const verRes = await fetch(`${FB_URL}/content/version.json?t=${Date.now()}`, { cache: 'no-store' });
+            if (verRes.ok) cloudVer = await verRes.json();
+
+            const hasVer = !!(cloudVer && typeof cloudVer === 'object');
+            const needStations = !hasVer || localStorage.getItem('med26_dynamic_stations') === null || String(cloudVer.stations || 0) !== localStorage.getItem('med26_ver_stations');
+            const needSubjects = !hasVer || localStorage.getItem('med26_subjects_config') === null || String(cloudVer.subjects || 0) !== localStorage.getItem('med26_ver_subjects');
+            const needSettings = !hasVer || localStorage.getItem('med26_site_settings_cache') === null || String(cloudVer.settings || 0) !== localStorage.getItem('med26_ver_settings');
+
+            if (!needStations && !needSubjects && !needSettings) return;
+
             const [stRes, subRes, setRes] = await Promise.all([
-                fetch(`${FB_URL}/content/stations.json?t=${Date.now()}`, { cache: 'no-store' }),
-                fetch(`${FB_URL}/content/subjects.json?t=${Date.now()}`, { cache: 'no-store' }),
-                fetch(`${FB_URL}/settings.json?t=${Date.now()}`, { cache: 'no-store' })
+                needStations ? fetch(`${FB_URL}/content/stations.json?t=${Date.now()}`, { cache: 'no-store' }) : Promise.resolve(null),
+                needSubjects ? fetch(`${FB_URL}/content/subjects.json?t=${Date.now()}`, { cache: 'no-store' }) : Promise.resolve(null),
+                needSettings ? fetch(`${FB_URL}/settings.json?t=${Date.now()}`, { cache: 'no-store' }) : Promise.resolve(null)
             ]);
-            if (stRes.ok) {
+
+            let shouldRefreshUI = false;
+            if (stRes && stRes.ok) {
                 const cloudDyn = await stRes.json();
                 if (Array.isArray(cloudDyn)) {
                     localStorage.setItem('med26_dynamic_stations', JSON.stringify(cloudDyn));
                     mergeDynamicStationsInPlace(cloudDyn);
+                    shouldRefreshUI = true;
                 }
+                if (hasVer) localStorage.setItem('med26_ver_stations', String(cloudVer.stations || 0));
             }
-            if (subRes.ok) {
+            if (subRes && subRes.ok) {
                 const cloudSubs = await subRes.json();
                 if (Array.isArray(cloudSubs) && cloudSubs.length > 0) {
                     localStorage.setItem('med26_subjects_config', JSON.stringify(cloudSubs));
                     applyAllSyncedUI(cloudSubs);
+                    shouldRefreshUI = false;
                 } else {
-                    applyAllSyncedUI(window.MED26_ALL_SUBJECTS);
+                    shouldRefreshUI = true;
                 }
+                if (hasVer) localStorage.setItem('med26_ver_subjects', String(cloudVer.subjects || 0));
             }
-            if (setRes.ok) {
+            if (shouldRefreshUI) applyAllSyncedUI(window.MED26_ALL_SUBJECTS);
+
+            if (setRes && setRes.ok) {
                 const cloudSet = await setRes.json();
                 if (cloudSet) {
                     localStorage.setItem('med26_site_settings_cache', JSON.stringify(cloudSet));
                     applySiteSettingsFromCloud(cloudSet);
                 }
+                if (hasVer) localStorage.setItem('med26_ver_settings', String(cloudVer.settings || 0));
             }
         } catch (e) {}
     }
