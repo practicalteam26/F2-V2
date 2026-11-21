@@ -1496,6 +1496,7 @@ function showCohortToast(msg, icon = '🔥') {
     t.classList.add('toast-visible'); clearTimeout(cohortToastTimer); cohortToastTimer = setTimeout(hideCohortToast, 6000);
 }
 async function pollLiveCohortActivity() {
+	if (document.hidden) return;
     try {
         const res = await fetch(`${FIREBASE_BASE_URL}/scores.json?t=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) return;
@@ -1514,7 +1515,7 @@ async function pollLiveCohortActivity() {
         prevCohortSnapshot = data;
     } catch (e) {}
 }
-setInterval(pollLiveCohortActivity, 25000); setTimeout(pollLiveCohortActivity, 4500);
+setInterval(pollLiveCohortActivity, 90000); setTimeout(pollLiveCohortActivity, 4500);
 
 window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && document.body.classList.contains('med26-zen-mode')) { toggleZenFocusMode(false); return; }
