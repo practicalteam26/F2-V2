@@ -313,8 +313,34 @@ body.light-mode .footer-marquee-wrap {
     #mobile-bottom-bar { grid-template-columns: repeat(6, minmax(0, 1fr)) !important; padding: 6px 4px !important; gap: 3px !important; }
     #f2-checklist-modal table { min-width: 680px !important; }
 }
-/* ================= ملء الشاشة بالكامل بدون فراغات يمين ويسار ================= */
-#main-header > div,
+
+/* ================= تنظيم وتوسيط الشريط الأساسي في صفّين (مشابه للموقع الأول) ================= */
+#main-header > div {
+    max-width: 1380px !important;
+    width: 96% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+}
+
+@media (min-width: 768px) {
+    #main-header > div {
+        justify-content: center !important;
+        align-items: center !important;
+        column-gap: 14px !important;
+        row-gap: 9px !important;
+    }
+    #desktop-nav-row {
+        order: 99 !important;
+        flex-basis: 100% !important;
+        width: 100% !important;
+        display: flex !important;
+        justify-content: center !important;
+    }
+}
+
+/* ================= ملء الشاشة للمحتوى الرئيسي والفوتر ================= */
 main,
 footer > div:last-child {
     max-width: 100% !important;
@@ -324,7 +350,6 @@ footer > div:last-child {
 }
 
 @media (min-width: 1024px) {
-    #main-header > div,
     main,
     footer > div:last-child {
         padding-left: 24px !important;
@@ -356,6 +381,7 @@ body.med26-zen-mode main {
 .footer-marquee-track {
     animation-duration: 62s !important;
 }
+
 /* إصلاح اتجاه الآيات القرآنية والأذكار داخل الشريط السفلي المتحرك (منع انعكاس الأقواس) */
 .footer-marquee-track > div > span:not([dir="ltr"]) {
     direction: rtl;
