@@ -62,19 +62,54 @@ function getTrackMistakeQuestions() {
         .sort((a, b) => (smartMistakesMap[String(a.id)]?.streak || 0) - (smartMistakesMap[String(b.id)]?.streak || 0));
 }
 
-function showSmartMistakeToast(msg, tone = 'rose') {
+function hideSmartMistakeToast() {
+    clearTimeout(smartMistakeToastTimer);
+    document.getElementById('smart-mistake-toast')?.classList.add('hidden');
+}
+
+function dismissSmartMistakeToastForever() {
+    localStorage.setItem('med26_hide_mistake_toasts', '1');
+    hideSmartMistakeToast();
+    updateMistakeToastMenuLabel();
+}
+
+function toggleMistakeToastsPref() {
+    if (localStorage.getItem('med26_hide_mistake_toasts') === '1') {
+        localStorage.removeItem('med26_hide_mistake_toasts');
+        updateMistakeToastMenuLabel();
+        showSmartMistakeToast('🔔 تم تفعيل إشعارات الأخطاء المنبثقة مجدداً', 'emerald', true);
+    } else {
+        dismissSmartMistakeToastForever();
+    }
+}
+
+function updateMistakeToastMenuLabel() {
+    const muted = localStorage.getItem('med26_hide_mistake_toasts') === '1';
+    const txt = muted ? '🔔 إعادة تفعيل إشعارات الأخطاء' : '🔕 إيقاف إشعارات الأخطاء نهائياً';
+    ['toggle-mistake-toasts-label', 'mob-toggle-mistake-toasts-label'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = txt;
+    });
+}
+
+function showSmartMistakeToast(msg, tone = 'rose', forceShow = false) {
+    if (!forceShow && localStorage.getItem('med26_hide_mistake_toasts') === '1') return;
     const el = document.getElementById('smart-mistake-toast');
     if (!el) return;
     const styles = {
-        emerald: 'bg-emerald-600/90 border-emerald-300 text-white',
-        amber: 'bg-amber-500/90 border-amber-200 text-black',
-        rose: 'bg-rose-600/90 border-rose-300 text-white'
+        emerald: 'bg-emerald-950/95 border-emerald-400/80 text-emerald-100',
+        amber: 'bg-amber-950/95 border-amber-400/80 text-amber-100',
+        rose: 'bg-slate-950/95 border-rose-400/80 text-rose-100'
     };
-    el.className = `px-4 py-2.5 rounded-2xl text-center text-xs sm:text-sm font-extrabold border ${styles[tone] || styles.rose}`;
-    el.innerText = msg;
+    el.className = `px-3.5 py-2 rounded-2xl text-xs font-extrabold border flex items-center gap-2.5 ${styles[tone] || styles.rose}`;
+    el.innerHTML = `
+        <span class="leading-snug">${msg}</span>
+        <button type="button" onclick="dismissSmartMistakeToastForever()" class="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-black whitespace-nowrap shrink-0">إيقاف نهائياً</button>
+        <button type="button" onclick="hideSmartMistakeToast()" class="w-5 h-5 rounded-full bg-white/10 hover:bg-white/25 text-[10px] font-black flex items-center justify-center shrink-0">✕</button>
+    `;
     el.classList.remove('hidden');
     clearTimeout(smartMistakeToastTimer);
-    smartMistakeToastTimer = setTimeout(() => el.classList.add('hidden'), 3400);
+    smartMistakeToastTimer = setTimeout(hideSmartMistakeToast, 3200);
 }
 
 function updateStationMistakeBadge(qId) {
@@ -83,16 +118,70 @@ function updateStationMistakeBadge(qId) {
     const rec = smartMistakesMap[String(qId)];
     if (!rec) { banner.classList.add('hidden'); return; }
     const st = rec.streak || 0;
-    const dots = st >= 1 ? '🟢 ⚪' : '⚪ ⚪';
-    const txt = st >= 1
-        ? 'إتقان 1 / 2 — حلّه صح مرة أخرى الآن ليُحذف نهائياً من أخطائك!'
-        : 'إتقان 0 / 2 — يحتاج حله صح مرتين متتاليتين ليُحذف من أخطائك';
     banner.className = st >= 1
-        ? 'rounded-2xl px-3.5 py-2 text-xs font-extrabold flex flex-wrap justify-between items-center gap-2 border bg-amber-500/15 border-amber-400/60 text-amber-200'
-        : 'rounded-2xl px-3.5 py-2 text-xs font-extrabold flex flex-wrap justify-between items-center gap-2 border bg-rose-500/15 border-rose-400/60 text-rose-200';
-    banner.innerHTML = `<span>🎯 في قسم «مراجعة أخطائي» • ${txt}</span><span class="px-2.5 py-0.5 rounded-full bg-black/40 font-black" dir="ltr">${dots} (${st}/2)</span>`;
+        ? 'px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-lg text-[10px] sm:text-xs font-extrabold border bg-amber-500/20 border-amber-400/60 text-amber-200'
+        : 'px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-lg text-[10px] sm:text-xs font-extrabold border bg-rose-500/20 border-rose-400/60 text-rose-200';
+    banner.innerText = `🎯 أخطائي (${st}/2)`;
     banner.classList.remove('hidden');
 }
+
+// ================= إصلاح لون الشريط العلوي لبطاقات المواد في قسم النظري =================
+function fixTheorySubjectCardTopBorders() {
+    if (document.body.dataset.track !== 'theory') return;
+    const grid = document.querySelector('#view-home > .grid.grid-cols-1.md\\:grid-cols-2');
+    if (!grid) return;
+
+    let subjects = Array.isArray(window.MED26_ALL_SUBJECTS) ? window.MED26_ALL_SUBJECTS : [];
+    if (!subjects.length) {
+        try { subjects = JSON.parse(localStorage.getItem('med26_subjects_config') || '[]'); } catch (e) {}
+    }
+
+    Array.from(grid.children).forEach(card => {
+        if (!card || card.nodeType !== 1) return;
+        let col = '';
+
+        const titleEl = card.querySelector('h3, h4');
+        const cardTitle = (titleEl?.innerText || '').trim().toLowerCase();
+        if (cardTitle && subjects.length) {
+            const match = subjects.find(s => (s.track || 'practical') === 'theory' && String(s.name || '').trim().toLowerCase() === cardTitle)
+                || subjects.find(s => String(s.name || '').trim().toLowerCase() === cardTitle);
+            if (match?.color) col = match.color;
+        }
+
+        if (!col) {
+            const styled = card.querySelector('[style*="background-color"], [style*="background:"], [style*="color:"]');
+            if (styled) {
+                const raw = styled.getAttribute('style') || '';
+                const hexM = raw.match(/#[0-9a-fA-F]{6}\b/);
+                if (hexM) col = hexM[0];
+            }
+        }
+        if (!col && card.style.borderTopColor) col = card.style.borderTopColor;
+        if (!col) return;
+
+        card.style.setProperty('border-top', `3px solid ${col}`, 'important');
+        Array.from(card.children).forEach(ch => {
+            if (ch.offsetHeight > 0 && ch.offsetHeight <= 6) {
+                ch.style.setProperty('background', col, 'important');
+            }
+        });
+    });
+}
+
+(function watchTheorySubjectCards() {
+    let rafId = null;
+    const scheduleFix = () => {
+        if (rafId) return;
+        rafId = requestAnimationFrame(() => { rafId = null; fixTheorySubjectCardTopBorders(); });
+    };
+    window.addEventListener('DOMContentLoaded', () => {
+        fixTheorySubjectCardTopBorders();
+        const home = document.getElementById('view-home');
+        if (home && document.body.dataset.track === 'theory') {
+            new MutationObserver(scheduleFix).observe(home, { childList: true, subtree: true });
+        }
+    });
+})();
 
 var PAGE_TITLES_MAP = {
     home: 'الرئيسية | منصة OSPE التفاعلية MED26',
@@ -216,7 +305,7 @@ function formatPomoTime(sec) {
             <span class="kw-highlight text-xs sm:text-sm shrink-0">${v}</span>
         </div>`).join('');
 
-    const yearsHtml = ['2025','2024','2023','2022','2021','2020'].map(y => `
+    const yearsHtml = ['2025','2024','2023','2022','2021','2020','2019','2018'].map(y => `
         <label class="flex items-center justify-center gap-1.5 cursor-pointer font-bold text-xs bg-[var(--bg-card)] p-2 rounded-xl border border-[var(--border-color)]">
             <input type="checkbox" value="${y}" checked onchange="updateCustomCount()" class="accent-[#cfa96b]"> ${y}
         </label>`).join('');
@@ -254,13 +343,36 @@ function formatPomoTime(sec) {
                 <span class="px-2 py-0.5 rounded-full text-[10px] font-black border text-sky-300 border-sky-400/40 bg-sky-500/15">🌱 مبتدئ</span>
             </button>
 
-            <div class="flex items-center gap-1.5 md:hidden">
-                <button id="mob-top-mistakes-btn" onclick="startTraining({source:'mistakes'})" class="pill-btn px-2 py-1.5 rounded-xl text-[11px] font-extrabold text-rose-300 border-rose-400/40">🎯 <span id="mob-top-mistake-count">0</span></button>
-                <button id="mob-top-checklist-btn" onclick="openLabChecklistModal()" class="pill-btn px-2 py-1.5 rounded-xl text-[11px] font-extrabold text-emerald-300">✅ الختم</button>
-                <button onclick="startBlitzMode()" class="pill-btn px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold text-amber-300">⚡ 60ث</button>
-                <button onclick="toggleTheme()" class="pill-btn px-2.5 py-1.5 rounded-xl text-xs font-bold">☀️/🌙</button>
+            <!-- قائمة أدواتي العلوية للجوال -->
+            <div id="mob-tools-dropdown-wrap" class="relative md:hidden">
+                <button type="button" onclick="document.getElementById('mob-tools-menu').classList.toggle('hidden')" class="pill-btn px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1"><span>⚙️ أدواتي</span><span class="text-[9px]">▼</span></button>
+                <div id="mob-tools-menu" class="hidden absolute left-0 mt-2 w-60 bg-[var(--bg-card)] border-2 border-[var(--gold-primary)] rounded-2xl shadow-2xl p-2 z-50 space-y-1 text-right">
+                    <button id="mob-custom" onclick="switchView('custom');document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>🎯 التدريب المخصص</span><span>⬅️</span></button>
+                    <button id="mob-fav" onclick="startTraining({source:'bookmarks'});document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-300"><span>⭐ المفضلة (<span id="mob-fav-count">0</span>)</span><span>⭐</span></button>
+                    <button id="mob-sim" onclick="startExamSimulator();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>⏱️ المحاكي (18 محطة)</span><span>🚀</span></button>
+                    <button onclick="startBlitzMode();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-300"><span>⚡ تحدي 60 ثانية (Blitz)</span><span>🔥</span></button>
+                    <button onclick="startTraining({source:'mistakes'});document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-rose-300"><span>🔁 جلسة مراجعة أخطائي (2×)</span><span>🎯</span></button>
+                    <button onclick="toggleMistakeToastsPref();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-200"><span id="mob-toggle-mistake-toasts-label">🔕 إيقاف إشعارات الأخطاء نهائياً</span><span>💬</span></button>
+                    <button onclick="togglePomodoroVisibility();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-emerald-300"><span>🍅 إظهار / إخفاء بومودورو</span><span>⏱️</span></button>
+                    <button onclick="printCustomPDF('both');document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>🖨️ طباعة أخطائي ومفضلتي PDF</span><span>📄</span></button>
+                    <button onclick="changeUsernamePrompt();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-300"><span>🔑 اسمي وكود المزامنة</span><span>👤</span></button>
+                    <button onclick="toggleTheme();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>☀️ / 🌙 تبديل المظهر</span><span>🎨</span></button>
+                    <a href="https://t.me/Med26JU_bot" target="_blank" class="w-full text-right px-3 py-2 rounded-xl text-xs font-extrabold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-[var(--gold-bright)] border-t border-[var(--border-color)] pt-2"><span>✈️ بوت الدفعة</span><span dir="ltr">@Med26JU_bot</span></a>
+                </div>
             </div>
 
+            <!-- شريط التنقل العلوي للجوال (بديل الشريط السفلي) -->
+            <div id="mobile-top-nav-row" class="md:hidden w-full pt-1">
+                <div id="mobile-top-nav" class="grid grid-cols-5 gap-1 bg-[var(--bg-main)]/85 border border-[var(--border-color)] p-1 rounded-2xl">
+                    <button onclick="switchView('home')" id="mob-home" class="pill-btn ${defView === 'home' ? 'active' : ''} py-1.5 px-1 rounded-xl flex flex-col items-center justify-center text-[10px] font-extrabold leading-tight"><span class="text-xs">🏠</span><span>الرئيسية</span></button>
+                    <button onclick="switchView('scoreboard')" id="mob-scoreboard" class="pill-btn ${defView === 'scoreboard' ? 'active' : ''} py-1.5 px-1 rounded-xl flex flex-col items-center justify-center text-[10px] font-extrabold text-orange-300 leading-tight"><span class="text-xs">🔥</span><span>المتصدرين</span></button>
+                    <button onclick="openLabChecklistModal()" id="mob-top-checklist-btn" type="button" class="pill-btn py-1.5 px-1 rounded-xl flex flex-col items-center justify-center text-[10px] font-extrabold text-emerald-300 leading-tight"><span class="text-xs">✅</span><span>الختم <span id="mob-cl-badge">0/12</span></span></button>
+                    <button onclick="startTraining({source:'mistakes'})" id="mob-top-mistakes-btn" type="button" class="pill-btn py-1.5 px-1 rounded-xl flex flex-col items-center justify-center text-[10px] font-extrabold text-rose-300 leading-tight"><span class="text-xs">🎯</span><span>أخطائي (<span id="mob-top-mistake-count">0</span>)</span></button>
+                    <button onclick="switchView('atlas')" id="mob-atlas" class="pill-btn ${defView === 'atlas' ? 'active' : ''} py-1.5 px-1 rounded-xl flex flex-col items-center justify-center text-[10px] font-extrabold leading-tight"><span class="text-xs">🖼️</span><span>الأطلس</span></button>
+                </div>
+            </div>
+
+            <!-- شريط التنقل العلوي المتمركز للشاشات المتوسطة والبيسي -->
             <div id="desktop-nav-row" class="hidden md:flex w-full justify-center pt-0.5">
                 <div id="desktop-main-nav" class="flex flex-wrap items-center justify-center gap-1.5 bg-[var(--bg-main)]/80 border border-[var(--border-color)] px-2.5 py-1.5 rounded-2xl shadow-inner">
                     <button onclick="switchView('home')" id="nav-home" class="pill-btn ${defView === 'home' ? 'active' : ''} px-3 py-2 rounded-xl text-xs lg:text-sm font-bold">🏠 الرئيسية</button>
@@ -273,6 +385,7 @@ function formatPomoTime(sec) {
                         <div id="my-tools-menu" class="hidden absolute left-0 mt-2 w-64 bg-[var(--bg-card)] border-2 border-[var(--gold-primary)] rounded-2xl shadow-2xl p-2 z-50 space-y-1 text-right">
                             <button onclick="switchView('custom');document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>🎯 إعداد التدريب المخصص</span><span>⬅️</span></button>
                             <button onclick="startTraining({source:'mistakes'});document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-rose-300"><span>🔁 جلسة مراجعة أخطائي (2×)</span><span>🎯</span></button>
+                            <button onclick="toggleMistakeToastsPref();document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-200"><span id="toggle-mistake-toasts-label">🔕 إيقاف إشعارات الأخطاء نهائياً</span><span>💬</span></button>
                             <button onclick="togglePomodoroVisibility();document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-emerald-300"><span>🍅 إظهار / إخفاء مؤقت بومودورو</span><span>⏱️</span></button>
                             <button onclick="printCustomPDF('both');document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>🖨️ طباعة أخطائي ومفضلتي PDF</span><span>📄</span></button>
                             <button onclick="changeUsernamePrompt();document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-300"><span>🔑 اسمي وكود مزامنة أجهزتي</span><span>👤</span></button>
@@ -331,7 +444,7 @@ function formatPomoTime(sec) {
                             <div><div class="text-xs sm:text-sm font-black leading-tight">أكمل من حيث توقفت (Continue Session)</div><div id="continue-session-subtext" class="text-[10px] sm:text-[11px] font-bold opacity-85">ابدأ بالمحطات الأكثر تكراراً في الاختبار</div></div>
                         </button>
                     </div>
-                    <div class="inline-flex flex-wrap justify-center lg:justify-start items-center gap-2 px-3 py-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[11px] sm:text-xs font-bold text-[var(--gold-bright)]"><span>آخر تحديث: NOV 2026 • شامل تجميعات (2020 – 2025)</span></div>
+                    <div class="inline-flex flex-wrap justify-center lg:justify-start items-center gap-2 px-3 py-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[11px] sm:text-xs font-bold text-[var(--gold-bright)]"><span>آخر تحديث: NOV 2026 • شامل تجميعات (2018 – 2025)</span></div>
                     <h2 class="text-xl sm:text-3xl md:text-4xl font-black leading-snug">بنك التجميعات والتدريبات التفاعلي لـ Foundation 2</h2>
                     <p class="text-xs sm:text-base text-[var(--text-muted)] leading-relaxed">تدرّب مع محاكي الـ 18 محطة (من 20 درجة)، وتحدي الـ 60 ثانية السريع، ورابط تحدي الأصدقاء، وطباعة ملف أخطائك وملاحظاتك كـ PDF.</p>
                     <div class="pt-1 flex flex-wrap justify-center lg:justify-start gap-2">
@@ -499,7 +612,7 @@ function formatPomoTime(sec) {
                         </div>
                         <div class="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-2xl p-4 space-y-2.5">
                             <h3 class="text-sm sm:text-base font-extrabold text-[var(--gold-bright)]">3. سنوات التجميعات (Years):</h3>
-                            <div class="grid grid-cols-3 sm:grid-cols-6 gap-2" id="custom-years">${yearsHtml}</div>
+                            <div class="grid grid-cols-4 gap-2" id="custom-years">${yearsHtml}</div>
                         </div>
                         <div class="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-2xl p-4 space-y-2.5">
                             <h3 class="text-sm sm:text-base font-extrabold text-[var(--gold-bright)]">4. إعدادات الجلسة والمؤقت:</h3>
@@ -543,9 +656,9 @@ function formatPomoTime(sec) {
                 </div>
             </div>
 
-            <div id="timeout-toast" class="hidden bg-red-600/90 border border-red-300 text-white px-4 py-3 rounded-2xl text-center text-xs sm:text-sm font-extrabold">🔔 انتهى وقت المحطة! تم احتساب السؤال كخطأ وإضافته إلى قسم «مراجعة أخطائي».</div>
-            <div id="srs-toast" class="hidden bg-amber-500/90 border border-amber-200 text-black px-4 py-2.5 rounded-2xl text-center text-xs sm:text-sm font-extrabold">🔁 تم جدولة هذه المحطة لتظهر لك مجدداً بعد قليل لتثبيت حفظها!</div>
-            <div id="smart-mistake-toast" class="hidden px-4 py-2.5 rounded-2xl text-center text-xs sm:text-sm font-extrabold border"></div>
+            <div id="timeout-toast" class="hidden bg-red-600/95 border border-red-300 text-white px-4 py-2.5 rounded-2xl text-center text-xs sm:text-sm font-extrabold">🔔 انتهى وقت المحطة! أُضيف السؤال لقسم «مراجعة أخطائي».</div>
+            <div id="srs-toast" class="hidden bg-amber-500/95 border border-amber-200 text-black px-4 py-2 rounded-2xl text-center text-xs font-extrabold">🔁 تمت جدولة هذه المحطة لتظهر لك مجدداً بعد قليل!</div>
+            <div id="smart-mistake-toast" class="hidden"></div>
 
             <div id="station-navigator-wrap" class="app-card rounded-2xl px-3.5 py-2 flex items-center justify-between gap-3">
                 <span class="text-xs font-black text-[var(--gold-bright)] shrink-0">🗺️ خريطة المحطات:</span>
@@ -565,6 +678,7 @@ function formatPomoTime(sec) {
                         <span id="q-year" class="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-lg text-[10px] sm:text-xs font-extrabold"></span>
                         <span id="q-highyield" class="hidden bg-red-500/20 text-red-300 border border-red-400/40 px-2.5 py-0.5 rounded-lg text-[10px] sm:text-xs font-extrabold">🔥 الأكثر تكراراً</span>
                         <span id="q-compilation-tag" class="bg-sky-500/20 text-sky-300 border border-sky-400/40 px-2.5 py-0.5 rounded-lg text-[10px] sm:text-xs font-extrabold">📌 تجميعات سابقة</span>
+                        <span id="station-mistake-banner" class="hidden"></span>
                     </div>
                     <div id="q-sim-hidden-badge" class="hidden items-center gap-2 bg-amber-500/15 border border-amber-400/40 text-amber-200 px-3 py-1 rounded-xl text-xs font-extrabold">🔒 محطة اختبار محاكي (تم إخفاء المادة واللاب لمنع حرق الإجابة)</div>
                     <div class="flex items-center gap-1.5 sm:gap-2">
@@ -596,7 +710,6 @@ function formatPomoTime(sec) {
                     </div>
 
                     <div class="order-2 lg:order-1 lg:col-span-7 space-y-4 sm:space-y-5 w-full" id="q-text-col">
-                        <div id="station-mistake-banner" class="hidden"></div>
                         <div class="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-2xl p-4 sm:p-6">
                             <div class="text-[11px] sm:text-xs text-[var(--gold-bright)] font-bold mb-1.5">STATION QUESTION:</div>
                             <h3 id="q-text" class="text-base sm:text-xl md:text-2xl font-extrabold leading-relaxed whitespace-pre-line text-left" dir="ltr"></h3>
@@ -649,7 +762,6 @@ function formatPomoTime(sec) {
                         </div>
                         <div class="flex flex-wrap justify-between sm:justify-end items-center gap-2.5">
                             <a href="https://t.me/Med26JU_bot" target="_blank" class="w-full sm:w-auto bg-[var(--bg-secondary)] border border-[var(--border-color)] px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-bold flex justify-center items-center gap-1.5"><span>💬 بوت الدفعة:</span><span dir="ltr" class="kw-highlight">@Med26JU_bot</span></a>
-                            <div dir="ltr" class="text-xs text-[var(--text-muted)] font-bold hidden md:inline-block">Done by <span class="kw-highlight">Lester Crest</span></div>
                         </div>
                     </div>
                 </div>
@@ -671,20 +783,11 @@ function formatPomoTime(sec) {
 
     <div id="print-pdf-container" dir="rtl"></div>
 
-    <nav id="mobile-bottom-bar" class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--bg-secondary)]/95 border-t border-[var(--border-color)] px-1 py-1.5 grid grid-cols-6 gap-1">
-        <button onclick="switchView('home')" id="mob-home" class="pill-btn ${defView === 'home' ? 'active' : ''} py-1.5 rounded-xl flex flex-col items-center justify-center text-[10px] font-bold"><span class="text-sm">🏠</span><span>الرئيسية</span></button>
-        <button onclick="switchView('atlas')" id="mob-atlas" class="pill-btn ${defView === 'atlas' ? 'active' : ''} py-1.5 rounded-xl flex flex-col items-center justify-center text-[10px] font-bold"><span class="text-sm">🖼️</span><span>الأطلس</span></button>
-        <button onclick="switchView('custom')" id="mob-custom" class="pill-btn ${defView === 'custom' ? 'active' : ''} py-1.5 rounded-xl flex flex-col items-center justify-center text-[10px] font-bold"><span class="text-sm">🎯</span><span>التخصيص</span></button>
-        <button onclick="startTraining({source:'bookmarks'})" id="mob-fav" class="pill-btn py-1.5 rounded-xl flex flex-col items-center justify-center text-[10px] font-bold text-amber-300"><span class="text-sm">⭐</span><span>المفضلة (<span id="mob-fav-count">0</span>)</span></button>
-        <button onclick="startExamSimulator()" id="mob-sim" class="pill-btn py-1.5 rounded-xl flex flex-col items-center justify-center text-[10px] font-bold"><span class="text-sm">⏱️</span><span>المحاكي</span></button>
-        <button onclick="switchView('scoreboard')" id="mob-scoreboard" class="pill-btn ${defView === 'scoreboard' ? 'active' : ''} py-1.5 rounded-xl flex flex-col items-center justify-center text-[10px] font-bold text-orange-300"><span class="text-sm">🔥</span><span>المتصدرين</span></button>
-    </nav>
-
     <div id="zoom-modal" onclick="closeZoomModal()" class="fixed inset-0 bg-black/95 z-50 hidden items-center justify-center p-2 sm:p-4 cursor-zoom-out">
         <img id="zoom-img" src="" class="max-w-[96vw] max-h-[90vh] object-contain rounded-2xl border-2 border-[var(--gold-primary)]">
     </div>
 
-    <button id="ai-floating-btn" onclick="openAiTutor()" class="fixed left-3 sm:left-5 bottom-20 md:bottom-6 z-40 gold-btn px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 text-xs sm:text-sm font-black">
+    <button id="ai-floating-btn" onclick="openAiTutor()" class="fixed left-3 sm:left-5 bottom-4 md:bottom-6 z-40 gold-btn px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 text-xs sm:text-sm font-black">
         <span class="text-base sm:text-lg">🤖</span><span>اسأل المناضل (AI)</span>
     </button>
 
@@ -835,7 +938,7 @@ function toggleTheme() {
     localStorage.setItem('med26_theme_mode', isLight ? 'light' : 'dark');
 }
 
-// ================= 4. أدوات العينة والسحب وتمرير الهيدر =================
+// ================= 4. أدوات العينة وتمرير الهيدر (بدون سحب لمس بين الأسئلة) =================
 function rotateSpecimen() {
     currentRotation = (currentRotation + 90) % 360;
     const img = document.getElementById('q-image');
@@ -857,7 +960,7 @@ function toggleLoupe() {
     if (!loupeActive && lens) lens.style.display = 'none';
 }
 (function bindSpecimenInteractions() {
-    const img = document.getElementById('q-image'), lens = document.getElementById('magnifier-lens'), lc = document.getElementById('loupe-container'), card = document.getElementById('station-card');
+    const img = document.getElementById('q-image'), lens = document.getElementById('magnifier-lens'), lc = document.getElementById('loupe-container');
     if (lc && img && lens) {
         const move = (e) => {
             if (!loupeActive) return;
@@ -875,15 +978,6 @@ function toggleLoupe() {
         lc.addEventListener('mousemove', move); lc.addEventListener('touchmove', move, { passive: false });
         lc.addEventListener('mouseleave', () => lens.style.display = 'none'); lc.addEventListener('touchend', () => lens.style.display = 'none');
     }
-    if (card) {
-        let sx = 0, sy = 0;
-        card.addEventListener('touchstart', e => { if (!loupeActive || !e.target.closest('#loupe-container')) { sx = e.changedTouches[0].screenX; sy = e.changedTouches[0].screenY; } }, { passive: true });
-        card.addEventListener('touchend', e => {
-            if ((loupeActive && e.target.closest('#loupe-container')) || ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
-            const dx = e.changedTouches[0].screenX - sx, dy = e.changedTouches[0].screenY - sy;
-            if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.6) { dx > 0 ? nextQuestion() : prevQuestion(); }
-        }, { passive: true });
-    }
     let lastY = window.scrollY;
     window.addEventListener('scroll', () => {
         const h = document.getElementById('main-header');
@@ -894,6 +988,8 @@ function toggleLoupe() {
     document.addEventListener('click', e => {
         const w = document.getElementById('my-tools-dropdown-wrap'), m = document.getElementById('my-tools-menu');
         if (w && m && !w.contains(e.target)) m.classList.add('hidden');
+        const mw = document.getElementById('mob-tools-dropdown-wrap'), mm = document.getElementById('mob-tools-menu');
+        if (mw && mm && !mw.contains(e.target)) mm.classList.add('hidden');
     });
 })();
 
@@ -949,7 +1045,7 @@ function updateStatsUI() {
     const bestT = times.length ? Math.min(...times) : 135;
     setT('gamemode-fastest-time', `⚡ أسرع وقت مسجل في الدفعة: ${String(Math.floor(bestT / 60)).padStart(2, '0')}:${String(bestT % 60).padStart(2, '0')} دقيقة`);
 }
-function updateSubjectCardsLabColors() {}
+function updateSubjectCardsLabColors() { fixTheorySubjectCardTopBorders(); }
 function updateStreakUI() {
     const b = document.getElementById('streak-badge'), t = document.getElementById('streak-text');
     if (!b || !t) return;
@@ -993,7 +1089,8 @@ function pickRandomSpotOfTheDay(forceRandom = false) {
     currentSpotStation = forceRandom ? pool[Math.floor(Math.random() * pool.length)] : pool[(new Date().getDate() + new Date().getMonth() * 31) % pool.length];
     const q = currentSpotStation, img = document.getElementById('spot-day-img'), qEl = document.getElementById('spot-day-q');
     if (!img || !qEl) return;
-    setSlideSource(img, q.page, q.slot || 0, false);
+    if (q.customImage) { img.onerror = null; img.style.display = ''; img.src = q.customImage; }
+    else { setSlideSource(img, q.page, q.slot || 0, false); }
     document.getElementById('spot-day-sub').innerText = `${q.subject} • ${q.lab} (${q.year})`;
     qEl.innerText = q.q;
     const ans = document.getElementById('spot-day-ans'); ans.innerHTML = q.a; ans.classList.add('hidden');
@@ -1023,6 +1120,7 @@ function switchView(view, skipHistoryPush = false) {
         const h = view === 'home' ? '#/home' : `#/${view}`;
         if (window.location.hash !== h) history.pushState({ view }, PAGE_TITLES_MAP[view] || '', h);
     }
+    if (view === 'home') fixTheorySubjectCardTopBorders();
     if (view === 'custom') updateCustomCount();
     if (view === 'atlas') renderAtlasGrid();
     if (view === 'scoreboard') renderScoreboardLists();
@@ -1051,7 +1149,20 @@ function acceptDisclaimer() {
 
 // ================= 7. الأطلس والتدريب والمحاكي والتحدي =================
 function getSubjectBadgeClass(sub) { return sub === 'MICROBIOLOGY' ? 'sub-micro' : sub === 'PATHOLOGY' ? 'sub-patho' : sub === 'HISTOLOGY' ? 'sub-histo' : 'sub-surg'; }
-function setSlideSource(imgEl, page, slot, isFull) { imgEl.onerror = null; imgEl.src = isFull ? `slides/p${page}_full.png` : `slides/p${page}_s${slot}.png`; }
+function setSlideSource(imgEl, page, slot, isFull) {
+    if (!imgEl) return;
+    imgEl.style.display = '';
+    imgEl.onerror = function() {
+        this.onerror = null;
+        if (this.id === 'q-image') {
+            document.getElementById('img-wrapper')?.classList.add('hidden');
+            document.getElementById('no-sample-badge')?.classList.remove('hidden');
+        } else {
+            this.style.display = 'none';
+        }
+    };
+    imgEl.src = isFull ? `slides/p${page}_full.png` : `slides/p${page}_s${slot}.png`;
+}
 
 function toggleBuzzwordsSubView(showBuzz) {
     document.getElementById('atlas-images-subview')?.classList.toggle('hidden', showBuzz);
@@ -1102,7 +1213,19 @@ function getCustomFilteredList() {
     const cat = document.querySelector('input[name="custom-cat"]:checked')?.value || 'all';
     const type = document.getElementById('custom-type')?.value || 'all';
     const hy = !!document.getElementById('custom-highyield')?.checked;
-    return questionsDB.filter(q => subs.includes(q.subject) && (cat === 'all' || q.category === cat) && (q.category !== 'compilation' || yrs.includes(String(q.year))) && (type === 'all' || q.type === type) && (!hy || q.highYield));
+    return questionsDB.filter(q => {
+        if (!subs.includes(q.subject)) return false;
+        if (cat !== 'all' && q.category !== cat) return false;
+        if (q.category === 'compilation') {
+            const rawY = String(q.year || q.badgeText || '');
+            const yMatch = rawY.match(/\b(20\d{2})\b/);
+            const cleanY = yMatch ? yMatch[1] : rawY.trim();
+            if (cleanY && !yrs.includes(cleanY)) return false;
+        }
+        if (type !== 'all' && q.type !== type) return false;
+        if (hy && !q.highYield) return false;
+        return true;
+    });
 }
 function updateCustomCount() { const el = document.getElementById('custom-match-count'); if (el) el.innerText = getCustomFilteredList().length; }
 
@@ -1198,7 +1321,11 @@ function renderStationNavigator() {
         const r = sessionResults[q.id];
         return `<button type="button" onclick="jumpToStation(${idx})" class="st-nav-box ${r ? (r.correct ? 'nav-correct' : 'nav-wrong') : ''} ${idx === currentIndex ? 'nav-current' : ''}">${idx + 1}</button>`;
     }).join('');
-    bar.querySelector('.nav-current')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    // تمرير أفقي داخل شريط الخريطة فقط بدون تحريك الصفحة عمودياً إطلاقاً
+    const currBtn = bar.querySelector('.nav-current');
+    if (currBtn) {
+        bar.scrollLeft = Math.max(0, currBtn.offsetLeft - (bar.clientWidth / 2) + (currBtn.offsetWidth / 2));
+    }
 }
 function jumpToStation(idx) {
     if (idx < 0 || idx >= currentList.length) return;
@@ -1237,30 +1364,38 @@ function renderQuestion() {
     document.getElementById('q-text').innerText = q.q;
     document.getElementById('img-wrapper').classList.toggle('hidden', !!q.noSample);
     document.getElementById('no-sample-badge').classList.toggle('hidden', !q.noSample);
-    if (!q.noSample) setSlideSource(img, q.page, q.slot || 0, false);
+    if (!q.noSample) {
+        if (q.customImage) { img.onerror = null; img.style.display = ''; img.src = q.customImage; }
+        else { setSlideSource(img, q.page, q.slot || 0, false); }
+    }
 
     document.getElementById('team-note-box').classList.toggle('hidden', !q.note);
     if (q.note) document.getElementById('team-note-text').innerText = q.note;
 
     const mcqBox = document.getElementById('mcq-container'), typBox = document.getElementById('typing-checker-box');
+    const revBtn = document.getElementById('reveal-btn');
     document.getElementById('answer-box').classList.add('hidden');
-    document.getElementById('reveal-btn').classList.remove('hidden');
     document.getElementById('q-answer').innerHTML = q.a;
 
     if (q.type === 'mcq') {
-        typBox.classList.add('hidden'); mcqBox.classList.remove('hidden'); mcqBox.innerHTML = '';
+        typBox.classList.add('hidden');
+        if (revBtn) revBtn.classList.add('hidden');
+        mcqBox.classList.remove('hidden'); mcqBox.innerHTML = '';
         (q.options || []).forEach((opt, i) => {
             const b = document.createElement('button');
             b.className = 'w-full text-left p-3.5 sm:p-4 rounded-xl pill-btn font-bold text-sm sm:text-base md:text-lg block';
             b.innerText = opt; b.onclick = () => checkMcq(i, q.correct);
             mcqBox.appendChild(b);
         });
-    } else { typBox.classList.remove('hidden'); mcqBox.classList.add('hidden'); }
+    } else {
+        typBox.classList.remove('hidden');
+        if (revBtn) revBtn.classList.remove('hidden');
+        mcqBox.classList.add('hidden');
+    }
 
     document.getElementById('flashcard-srs-controls')?.classList.toggle('hidden', q.type === 'mcq');
     updateStationMistakeBadge(q.id);
     saveLastSessionState(); rotateGlobalAdhkar(); renderStationNavigator();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function checkMcq(selected, correct) {
@@ -1278,10 +1413,10 @@ function checkMcq(selected, correct) {
 }
 
 function revealAnswer() {
-    document.getElementById('reveal-btn').classList.add('hidden');
-    document.getElementById('answer-box').classList.remove('hidden');
-    document.getElementById('q-meta-badges').classList.remove('hidden');
-    document.getElementById('q-sim-hidden-badge').classList.add('hidden');
+    document.getElementById('reveal-btn')?.classList.add('hidden');
+    document.getElementById('answer-box')?.classList.remove('hidden');
+    document.getElementById('q-meta-badges')?.classList.remove('hidden');
+    document.getElementById('q-sim-hidden-badge')?.classList.add('hidden');
 }
 
 function levenshteinDistance(a, b) {
@@ -1347,9 +1482,9 @@ function markQuestion(isMastered, autoAdvance = true) {
             if (smartMistakesMap[idKey].streak >= 2) {
                 delete smartMistakesMap[idKey];
                 if (!masteredIds.includes(q.id)) masteredIds.push(q.id);
-                showSmartMistakeToast('🎉 بطل! حلّيت هذا السؤال صح مرتين متتاليتين وتم حذفه من «مراجعة أخطائي» نهائياً!', 'emerald');
+                showSmartMistakeToast('🎉 بطل! تم إتقانه مرتين متتاليتين وحذفه من أخطائك', 'emerald');
             } else {
-                showSmartMistakeToast('🔥 أحسنت! تقدّم الإتقان (1 / 2) — حلّه صح مرة أخرى ليتخرج من أخطائك!', 'amber');
+                showSmartMistakeToast('🔥 ممتاز (1/2) — حلّه صح مرة أخرى ليتخرج من أخطائك', 'amber');
             }
         } else {
             if (!masteredIds.includes(q.id)) masteredIds.push(q.id);
@@ -1358,7 +1493,7 @@ function markQuestion(isMastered, autoAdvance = true) {
         currentStreak = 0;
         const prevMisses = smartMistakesMap[idKey]?.misses || 0;
         smartMistakesMap[idKey] = { streak: 0, misses: prevMisses + 1, lastSeen: Date.now() };
-        showSmartMistakeToast('🎯 أُضيف السؤال لقسم «مراجعة أخطائي» (0 / 2 — يحتاج حله صح مرتين متتاليتين)', 'rose');
+        showSmartMistakeToast('🎯 أُضيف لقسم «مراجعة أخطائي» (0/2)', 'rose');
     }
 
     syncSmartMistakesStorage();
@@ -1504,10 +1639,11 @@ function updateChecklistProgressUI() {
     let checks = 0, studied = 0;
     labs.forEach(l => { const r = d[l.id] || {}; if (r.study1) studied++; ['study1','rev1','rev2','rev3','qs'].forEach(f => { if (r[f]) checks++; }); });
     const pct = labs.length ? Math.round((checks / (labs.length * 5)) * 100) : 0;
-    const bar = document.getElementById('cl-progress-bar'), txt = document.getElementById('cl-progress-text'), b = document.getElementById('nav-cl-badge'), hl = document.getElementById('hero-quick-labs');
+    const bar = document.getElementById('cl-progress-bar'), txt = document.getElementById('cl-progress-text'), b = document.getElementById('nav-cl-badge'), mb = document.getElementById('mob-cl-badge'), hl = document.getElementById('hero-quick-labs');
     if (bar) bar.style.width = `${pct}%`;
     if (txt) txt.innerText = `أنجزت مذاكرة ${studied} من ${labs.length} (${pct}%) 🎉`;
     if (b) b.innerText = `${studied}/${labs.length}`;
+    if (mb) mb.innerText = `${studied}/${labs.length}`;
     if (hl) hl.innerText = `✅ ${studied}/${labs.length} (${labs.length ? Math.round((studied / labs.length) * 100) : 0}%)`;
 }
 function openLabChecklistModal() {
@@ -1643,7 +1779,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('DOMContentLoaded', () => {
-    updateStatsUI(); updateContinueSessionBtnUI(); pickRandomSpotOfTheDay(false);
+    updateStatsUI(); updateContinueSessionBtnUI(); pickRandomSpotOfTheDay(false); updateMistakeToastMenuLabel(); fixTheorySubjectCardTopBorders();
     const params = new URLSearchParams(window.location.search);
     if ((params.get('challenge') || params.get('station')) && sessionStorage.getItem('med26_session_agreed') === '1') { acceptDisclaimer(); return; }
     const def = document.body.dataset.defaultView || 'home';
