@@ -243,14 +243,40 @@ body.light-mode .sub-surg  { color: #075985; }
 body.med26-zen-mode { background-color: #070605 !important; }
 body.med26-zen-mode #main-header,
 body.med26-zen-mode footer,
-body.med26-zen-mode #mobile-bottom-bar,
 body.med26-zen-mode #cinematic-fog-stage,
 body.med26-zen-mode #bg-Stage,
 body.med26-zen-mode #ai-floating-btn,
 body.med26-zen-mode #med26-pomo-widget,
 body.med26-zen-mode #dhikr-banner-trainer,
 body.med26-zen-mode #live-cohort-toast { display: none !important; }
-body.med26-zen-mode main { max-width: 1180px !important; padding-top: 1.25rem !important; }
+body.med26-zen-mode main { max-width: 100% !important; padding-top: 1.25rem !important; }
+
+/* إشعارات عائمة صغيرة ثابتة لا تحرّك صفحة الأسئلة إطلاقاً */
+#smart-mistake-toast,
+#srs-toast,
+#timeout-toast {
+    position: fixed !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    z-index: 140 !important;
+    width: auto !important;
+    max-width: min(92vw, 480px) !important;
+    margin: 0 !important;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.62) !important;
+    backdrop-filter: blur(12px);
+}
+#smart-mistake-toast {
+    bottom: 22px !important;
+}
+#srs-toast,
+#timeout-toast {
+    top: 18px !important;
+}
+@media (max-width: 767px) {
+    #smart-mistake-toast {
+        bottom: 62px !important;
+    }
+}
 
 /* المناضل AI ولوحة المتصدرين ونبض الدفعة */
 #ai-tutor-drawer { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -300,17 +326,25 @@ body.light-mode .footer-marquee-wrap {
     .print-station-box { page-break-inside: avoid; border: 2px solid #b88f4d !important; border-radius: 14px; padding: 14px; margin-bottom: 16px; background: #fdfbf7 !important; color: #111 !important; }
 }
 
-/* استجابة الجوال والآيباد */
+/* استجابة الجوال والآيباد (قوائم علوية منظمة بدون شريط سفلي) */
 @media (max-width: 1023px) { #top-dhikr-pill { display: none !important; } }
 @media (max-width: 767px) {
-    body { padding-bottom: 128px !important; }
+    body { padding-bottom: 72px !important; }
     #top-user-badge { padding: 4px 8px !important; font-size: 11px !important; }
     #top-user-badge span:last-child { display: none !important; }
-    #med26-pomo-widget { bottom: 74px !important; right: 10px !important; z-index: 45 !important; }
+    #mobile-top-nav-row {
+        order: 99 !important;
+        flex-basis: 100% !important;
+        width: 100% !important;
+    }
+    #mobile-top-nav {
+        scrollbar-width: none;
+    }
+    #mobile-top-nav::-webkit-scrollbar { display: none; }
+    #med26-pomo-widget { bottom: 14px !important; right: 10px !important; z-index: 45 !important; }
     #pomo-collapsed { padding: 5px 10px !important; font-size: 11px !important; }
-    #ai-floating-btn { bottom: 74px !important; left: 10px !important; padding: 8px 12px !important; font-size: 11px !important; z-index: 45 !important; }
+    #ai-floating-btn { bottom: 14px !important; left: 10px !important; padding: 8px 12px !important; font-size: 11px !important; z-index: 45 !important; }
     #custom-subjects { grid-template-columns: 1fr !important; }
-    #mobile-bottom-bar { grid-template-columns: repeat(6, minmax(0, 1fr)) !important; padding: 6px 4px !important; gap: 3px !important; }
     #f2-checklist-modal table { min-width: 680px !important; }
 }
 
@@ -340,7 +374,7 @@ body.light-mode .footer-marquee-wrap {
     }
 }
 
-/* ================= ملء الشاشة للمحتوى الرئيسي والفوتر ================= */
+/* ================= ملء الشاشة للمحتوى الرئيسي والأسئلة والفوتر ================= */
 main,
 footer > div:last-child {
     max-width: 100% !important;
@@ -357,13 +391,12 @@ footer > div:last-child {
     }
 }
 
-/* تمديد بانر الرئيسية وتقرير النتيجة ووضع التركيز والـ Checklist لملء العرض */
+/* تمديد بانر الرئيسية وتقرير النتيجة والـ Checklist لملء العرض */
 #bento-hero-upgraded > .max-w-2xl {
     max-width: none !important;
     flex: 1 1 0%;
 }
-#view-report > .app-card,
-body.med26-zen-mode main {
+#view-report > .app-card {
     max-width: 100% !important;
 }
 #f2-checklist-modal > div {
