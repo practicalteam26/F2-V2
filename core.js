@@ -20,6 +20,11 @@ var maxSessionStreak = 0;
 var currentAtlasFilter = 'ALL';
 var currentSpotStation = null;
 
+// متغيرات وضع تحدي 1v1 (0 بايت على Firebase)
+var activeVsOpponent = null;
+var is1v1CreatorMode = false;
+var lastFinishedSessionSummary = null;
+
 var loupeActive = false;
 var currentRotation = 0;
 var enhanceLevel = 0;
@@ -28,6 +33,36 @@ var masteredIds = JSON.parse(localStorage.getItem('med26_f2_mastered') || '[]');
 var mistakeIds = JSON.parse(localStorage.getItem('med26_f2_mistakes') || '[]');
 var bookmarkIds = JSON.parse(localStorage.getItem('med26_f2_bookmarks') || '[]');
 var personalNotes = JSON.parse(localStorage.getItem('med26_f2_notes') || '{}');
+
+// ================= محرك تشفير وفك تشفير روابط تحدي 1v1 (يدعم الأسماء العربية) =================
+function formatSecMMSS(sec) {
+    const s = Math.max(0, parseInt(sec, 10) || 0);
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function encodeVsPayload(obj) {
+    try {
+        const json = JSON.stringify(obj);
+        const bytes = new TextEncoder().encode(json);
+        let bin = '';
+        bytes.forEach(b => { bin += String.fromCharCode(b); });
+        return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    } catch (e) { return ''; }
+}
+
+function decodeVsPayload(str) {
+    try {
+        if (!str) return null;
+        let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+        while (b64.length % 4) b64 += '=';
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const obj = JSON.parse(new TextDecoder().decode(bytes));
+        if (obj && typeof obj.n === 'string' && typeof obj.s === 'number') return obj;
+    } catch (e) {}
+    return null;
+}
 
 // ================= محرك بنك الأخطاء والمراجعة المتباعدة الذكية (التثبيت المزدوج 2×) =================
 var smartMistakesMap = {};
@@ -125,12 +160,20 @@ function updateStationMistakeBadge(qId) {
     banner.classList.remove('hidden');
 }
 
-// ================= إصلاح لون الشريط العلوي لبطاقات المواد في قسم النظري =================
+// ================= إصلاح لون الشريط العلوي للنظري + توهّج بطاقات المواد بلون كل مادة =================
+function hexToRgbaGlow(hex, alpha = 0.36) {
+    if (!hex || typeof hex !== 'string') return '';
+    const m = hex.trim().match(/^#?([0-9a-fA-F]{6})$/);
+    if (!m) return hex;
+    const n = parseInt(m[1], 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
 function fixTheorySubjectCardTopBorders() {
-    if (document.body.dataset.track !== 'theory') return;
     const grid = document.querySelector('#view-home > .grid.grid-cols-1.md\\:grid-cols-2');
     if (!grid) return;
 
+    const isTheory = document.body.dataset.track === 'theory';
     let subjects = Array.isArray(window.MED26_ALL_SUBJECTS) ? window.MED26_ALL_SUBJECTS : [];
     if (!subjects.length) {
         try { subjects = JSON.parse(localStorage.getItem('med26_subjects_config') || '[]'); } catch (e) {}
@@ -143,7 +186,7 @@ function fixTheorySubjectCardTopBorders() {
         const titleEl = card.querySelector('h3, h4');
         const cardTitle = (titleEl?.innerText || '').trim().toLowerCase();
         if (cardTitle && subjects.length) {
-            const match = subjects.find(s => (s.track || 'practical') === 'theory' && String(s.name || '').trim().toLowerCase() === cardTitle)
+            const match = subjects.find(s => (s.track || 'practical') === (isTheory ? 'theory' : 'practical') && String(s.name || '').trim().toLowerCase() === cardTitle)
                 || subjects.find(s => String(s.name || '').trim().toLowerCase() === cardTitle);
             if (match?.color) col = match.color;
         }
@@ -159,16 +202,20 @@ function fixTheorySubjectCardTopBorders() {
         if (!col && card.style.borderTopColor) col = card.style.borderTopColor;
         if (!col) return;
 
-        card.style.setProperty('border-top', `3px solid ${col}`, 'important');
-        Array.from(card.children).forEach(ch => {
-            if (ch.offsetHeight > 0 && ch.offsetHeight <= 6) {
-                ch.style.setProperty('background', col, 'important');
-            }
-        });
+        card.style.setProperty('--card-glow', hexToRgbaGlow(col, 0.38));
+
+        if (isTheory) {
+            card.style.setProperty('border-top', `3px solid ${col}`, 'important');
+            Array.from(card.children).forEach(ch => {
+                if (ch.offsetHeight > 0 && ch.offsetHeight <= 6) {
+                    ch.style.setProperty('background', col, 'important');
+                }
+            });
+        }
     });
 }
 
-(function watchTheorySubjectCards() {
+(function watchSubjectCardsStyle() {
     let rafId = null;
     const scheduleFix = () => {
         if (rafId) return;
@@ -177,9 +224,7 @@ function fixTheorySubjectCardTopBorders() {
     window.addEventListener('DOMContentLoaded', () => {
         fixTheorySubjectCardTopBorders();
         const home = document.getElementById('view-home');
-        if (home && document.body.dataset.track === 'theory') {
-            new MutationObserver(scheduleFix).observe(home, { childList: true, subtree: true });
-        }
+        if (home) new MutationObserver(scheduleFix).observe(home, { childList: true, subtree: true });
     });
 })();
 
@@ -194,24 +239,41 @@ var PAGE_TITLES_MAP = {
     checklist: 'جدول ختم اللابات Checklist | MED26 OSPE'
 };
 var MULTI_PAGE_FILES = { home: 'index.html', atlas: 'atlas.html', custom: 'custom.html', scoreboard: 'scoreboard.html' };
+
 var MED26_ADHKAR_LIST = [
-    // آيات قرآنية للتوفيق والطمأنينة وطلب العلم
+    // آيات قرآنية في الذكر والطمأنينة والصبر وطلب العلم
+    "📖 ﴿وَاذْكُر رَّبَّكَ كَثِيرًا وَسَبِّحْ بِالْعَشِيِّ وَالْإِبْكَارِ﴾",
+    "📖 ﴿رَّبُّ السَّمَاوَاتِ وَالْأَرْضِ وَمَا بَيْنَهُمَا فَاعْبُدْهُ وَاصْطَبِرْ لِعِبَادَتِهِ ۚ هَلْ تَعْلَمُ لَهُ سَمِيًّا﴾",
+    "📖 ﴿وَاذْكُرِ اسْمَ رَبِّكَ وَتَبَتَّلْ إِلَيْهِ تَبْتِيلًا﴾",
     "📖 ﴿وَقُل رَّبِّ زِدْنِي عِلْمًا﴾",
     "📖 ﴿رَبِّ اشْرَحْ لِي صَدْرِي ۝ وَيَسِّرْ لِي أَمْرِي﴾",
     "📖 ﴿أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ﴾",
+    "📖 ﴿فَاذْكُرُونِي أَذْكُرْكُمْ وَاشْكُرُوا لِي وَلَا تَكْفُرُونِ﴾",
+    "📖 ﴿وَاذْكُر رَّبَّكَ إِذَا نَسِيتَ وَقُلْ عَسَىٰ أَن يَهْدِيَنِ رَبِّي لِأَقْرَبَ مِنْ هَٰذَا رَشَدًا﴾",
+    "📖 ﴿وَسَبِّحْ بِحَمْدِ رَبِّكَ قَبْلَ طُلُوعِ الشَّمْسِ وَقَبْلَ غُرُوبِهَا﴾",
+    "📖 ﴿وَمِنَ اللَّيْلِ فَسَبِّحْهُ وَإِدْبَارَ النُّجُومِ﴾",
     "📖 ﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾",
+    "📖 ﴿سَيَجْعَلُ اللَّهُ بَعْدَ عُسْرٍ يُسْرًا﴾",
     "📖 ﴿وَمَن يَتَوَكَّلْ عَلَى اللَّهِ فَهُوَ حَسْبُهُ﴾",
+    "📖 ﴿وَمَن يَتَّقِ اللَّهَ يَجْعَل لَّهُ مَخْرَجًا ۝ وَيَرْزُقْهُ مِنْ حَيْثُ لَا يَحْتَسِبُ﴾",
     "📖 ﴿وَمَا تَوْفِيقِي إِلَّا بِاللَّهِ عَلَيْهِ تَوَكَّلْتُ وَإِلَيْهِ أُنِيبُ﴾",
+    "📖 ﴿وَتَوَكَّلْ عَلَى الْحَيِّ الَّذِي لَا يَمُوتُ وَسَبِّحْ بِحَمْدِهِ﴾",
     "📖 ﴿إِنَّ اللَّهَ لَا يُضِيعُ أَجْرَ مَنْ أَحْسَنَ عَمَلًا﴾",
     "📖 ﴿وَأَن لَّيْسَ لِلْإِنسَانِ إِلَّا مَا سَعَىٰ ۝ وَأَنَّ سَعْيَهُ سَوْفَ يُرَىٰ﴾",
     "📖 ﴿يَرْفَعِ اللَّهُ الَّذِينَ آمَنُوا مِنكُمْ وَالَّذِينَ أُوتُوا الْعِلْمَ دَرَجَاتٍ﴾",
     "📖 ﴿لَا يُكَلِّفُ اللَّهُ نَفْسًا إِلَّا وُسْعَهَا﴾",
     "📖 ﴿لَئِن شَكَرْتُمْ لَأَزِيدَنَّكُمْ﴾",
     "📖 ﴿وَاصْبِرْ فَإِنَّ اللَّهَ لَا يُضِيعُ أَجْرَ الْمُحْسِنِينَ﴾",
+    "📖 ﴿فَاصْبِرْ إِنَّ وَعْدَ اللَّهِ حَقٌّ وَاسْتَغْفِرْ لِذَنبِكَ﴾",
+    "📖 ﴿إِنَّ اللَّهَ مَعَ الصَّابِرِينَ﴾",
     "📖 ﴿وَقَالَ رَبُّكُمُ ادْعُونِي أَسْتَجِبْ لَكُمْ﴾",
+    "📖 ﴿إِنَّ رَبِّي قَرِيبٌ مُّجِيبٌ﴾",
+    "📖 ﴿وَلَسَوْفَ يُعْطِيكَ رَبُّكَ فَتَرْضَىٰ﴾",
+    "📖 ﴿وَالذَّاكِرِينَ اللَّهَ كَثِيرًا وَالذَّاكِرَاتِ أَعَدَّ اللَّهُ لَهُم مَّغْفِرَةً وَأَجْرًا عَظِيمًا﴾",
+    "📖 ﴿فَسَبِّحْ بِحَمْدِ رَبِّكَ وَكُن مِّنَ السَّاجِدِينَ﴾",
     "📖 ﴿إِن يَنصُرْكُمُ اللَّهُ فَلَا غَالِبَ لَكُمْ﴾",
 
-    // أذكار وأدعية المذاكرة والاختبارات
+    // أذكار وأدعية المذاكرة والاختبارات والسكينة
     "🌿 سُبْحَانَ اللَّهِ وَبِحَمْدِهِ، سُبْحَانَ اللَّهِ الْعَظِيمِ",
     "✨ اللَّهُمَّ صَلِّ وَسَلِّمْ وَبَارِكْ عَلَى نَبِيِّنَا مُحَمَّدٍ",
     "🤲 اللَّهُمَّ لَا سَهْلَ إِلَّا مَا جَعَلْتَهُ سَهْلًا، وَأَنْتَ تَجْعَلُ الْحَزْنَ إِذَا شِئْتَ سَهْلًا",
@@ -225,8 +287,17 @@ var MED26_ADHKAR_LIST = [
     "🌙 لَا إِلَهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَى كُلِّ شَيْءٍ قَدِيرٌ",
     "🤲 اللَّهُمَّ إِنِّي أَسْأَلُكَ عِلْمًا نَافِعًا، وَرِزْقًا طَيِّبًا، وَعَمَلًا مُتَقَبَّلًا",
     "🌿 سُبْحَانَ اللَّهِ وَبِحَمْدِهِ عَدَدَ خَلْقِهِ، وَرِضَا نَفْسِهِ، وَزِنَةَ عَرْشِهِ، وَمِدَادَ كَلِمَاتِهِ",
-    "✨ اللَّهُمَّ بَارِكْ لِي فِي وَقْتِي وَجُهْدِي وَارْزُقْنِي التَّوْفِيقَ وَالسَّدَادَ"
+    "✨ اللَّهُمَّ بَارِكْ لِي فِي وَقْتِي وَجُهْدِي وَارْزُقْنِي التَّوْفِيقَ وَالسَّدَادَ",
+    "🤲 اللَّهُمَّ إِنِّي أَسْتَوْدِعُكَ مَا قَرَأْتُ وَمَا حَفِظْتُ وَمَا تَعَلَّمْتُ فَرُدَّهُ عِنْدَ حَاجَتِي إِلَيْهِ",
+    "💎 اللَّهُمَّ أَعِنِّي عَلَى ذِكْرِكَ وَشُكْرِكَ وَحُسْنِ عِبَادَتِكَ",
+    "🤍 رَبِّ أَدْخِلْنِي مُدْخَلَ صِدْقٍ وَأَخْرِجْنِي مُخْرَجَ صِدْقٍ وَاجْعَل لِّي مِن لَّدُنكَ سُلْطَانًا نَّصِيرًا",
+    "🌟 رَضِيتُ بِاللَّهِ رَبًّا، وَبِالْإِسْلَامِ دِينًا، وَبِمُحَمَّدٍ ﷺ نَبِيًّا وَرَسُولًا",
+    "🌿 اللَّهُمَّ فَقِّهْنِي فِي عِلْمِي، وَافْتَحْ عَلَيَّ فُتُوحَ الْعَارِفِينَ",
+    "✨ يَا مُقَلِّبَ الْقُلُوبِ ثَبِّتْ قَلْبِي عَلَى دِينِكَ",
+    "🤲 اللَّهُمَّ اكْفِنِي بِحَلَالِكَ عَنْ حَرَامِكَ، وَأَغْنِنِي بِفَضْلِكَ عَمَّنْ سِوَاكَ",
+    "🌱 أَسْتَغْفِرُ اللَّهَ الْعَظِيمَ وَأَتُوبُ إِلَيْهِ"
 ];
+
 var BUZZWORDS_DATA = [
     ['Tonsillitis + Exudate + Cocci in chains', 'Streptococcus pyogenes (Beta)'],
     ['Yellow colonies on Mannitol Salt Agar (MSA)', 'Staphylococcus aureus'],
@@ -242,7 +313,7 @@ var BUZZWORDS_DATA = [
     ['Orange peel skin + Nipple retraction + Redness', "Peau d'orange (Breast Cancer)"]
 ];
 
-var currentDhikrIdx = 0;
+var currentDhikrIdx = Math.floor(Math.random() * MED26_ADHKAR_LIST.length);
 var pomoTimeLeft = parseInt(localStorage.getItem('med26_pomo_custom_min') || '25', 10) * 60;
 var pomoTotalTime = pomoTimeLeft;
 var pomoInterval = null;
@@ -256,14 +327,42 @@ var prevCohortSnapshot = {};
 var cohortToastTimer = null;
 var initialPulseShown = false;
 
-if (localStorage.getItem('med26_theme_mode') === 'light') {
-    document.body.classList.add('light-mode');
+// ================= تطبيق المظهر المحفوظ (داكن / أسود عميق AMOLED / فاتح) =================
+function applyThemeMode(mode) {
+    const valid = ['dark', 'amoled', 'light'].includes(mode) ? mode : 'dark';
+    document.body.classList.remove('light-mode', 'amoled-mode');
+    if (valid === 'light') document.body.classList.add('light-mode');
+    else if (valid === 'amoled') document.body.classList.add('amoled-mode');
+    localStorage.setItem('med26_theme_mode', valid);
+    updateThemeLabelsUI(valid);
 }
+
+function updateThemeLabelsUI(mode) {
+    const m = mode || localStorage.getItem('med26_theme_mode') || 'dark';
+    const nextLabel = m === 'dark' ? '🖤 تبديل للأسود العميق (AMOLED)' : m === 'amoled' ? '☀️ تبديل للمظهر الفاتح' : '🌙 تبديل للمظهر الداكن';
+    const shortIcon = m === 'dark' ? '🌙' : m === 'amoled' ? '🖤' : '☀️';
+    ['desktop-theme-label', 'mob-theme-label'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = nextLabel;
+    });
+    const trBtn = document.getElementById('trainer-theme-btn');
+    if (trBtn) trBtn.innerText = shortIcon;
+}
+
+applyThemeMode(localStorage.getItem('med26_theme_mode') || 'dark');
 
 function formatPomoTime(sec) {
     return `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 }
 
+function toggleAdhkarDrawer() {
+    const body = document.getElementById('adhkar-collapsible-body');
+    const arrow = document.getElementById('adhkar-toggle-arrow');
+    if (!body) return;
+    const isNowHidden = body.classList.toggle('hidden');
+    localStorage.setItem('med26_adhkar_open', isNowHidden ? '0' : '1');
+    if (arrow) arrow.innerText = isNowHidden ? 'تسبيح ▾' : 'طي ▴';
+}
 // ================= 1. بناء هيكل الواجهة الموحّد لجميع الصفحات =================
 (function mountUnifiedAppShell() {
     const root = document.getElementById('app-root');
@@ -277,26 +376,30 @@ function formatPomoTime(sec) {
     const t3 = localStorage.getItem('med26_tasbeeh_3') || '0';
     const t4 = localStorage.getItem('med26_tasbeeh_4') || '0';
     const pomoHidden = localStorage.getItem('med26_hide_pomo') === '1' ? 'hidden' : '';
+    const adhkarOpen = localStorage.getItem('med26_adhkar_open') === '1';
+    const initDhikr = MED26_ADHKAR_LIST[currentDhikrIdx % MED26_ADHKAR_LIST.length];
 
     const marqueeHtml = [
-        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-[var(--gold-bright)]">📖 ﴿وَقُل رَّبِّ زِدْنِي عِلْمًا﴾</span>`,
+        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-[var(--gold-bright)]">📖 ﴿وَاذْكُر رَّبَّكَ كَثِيرًا وَسَبِّحْ بِالْعَشِيِّ وَالْإِبْكَارِ﴾</span>`,
         `<span class="mx-6 text-xs sm:text-sm font-black text-white" dir="ltr">✨ Done by <span class="kw-highlight">Lester Crest</span> • MED26</span>`,
-        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-emerald-300">📖 ﴿أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ﴾</span>`,
+        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-emerald-300">📖 ﴿رَّبُّ السَّمَاوَاتِ وَالْأَرْضِ وَمَا بَيْنَهُمَا فَاعْبُدْهُ وَاصْطَبِرْ لِعِبَادَتِهِ ۚ هَلْ تَعْلَمُ لَهُ سَمِيًّا﴾</span>`,
         `<span class="mx-6 text-xs sm:text-sm font-extrabold text-[var(--gold-bright)]">🌿 سُبْحَانَ اللَّهِ وَبِحَمْدِهِ • سُبْحَانَ اللَّهِ الْعَظِيمِ</span>`,
-        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-amber-300">📖 ﴿وَمَا تَوْفِيقِي إِلَّا بِاللَّهِ عَلَيْهِ تَوَكَّلْتُ وَإِلَيْهِ أُنِيبُ﴾</span>`,
+        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-amber-300">📖 ﴿وَاذْكُرِ اسْمَ رَبِّكَ وَتَبَتَّلْ إِلَيْهِ تَبْتِيلًا﴾</span>`,
         `<span class="mx-6 text-xs sm:text-sm font-black text-white" dir="ltr">🏛️ MED26 JAZAN UNIVERSITY • FOUNDATION 2 OSPE</span>`,
-        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-emerald-300">🤲 اللَّهُمَّ لَا سَهْلَ إِلَّا مَا جَعَلْتَهُ سَهْلًا</span>`,
-        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-[var(--gold-bright)]">📖 ﴿إِنَّ اللَّهَ لَا يُضِيعُ أَجْرَ مَنْ أَحْسَنَ عَمَلًا﴾</span>`,
-        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-amber-300">✨ اللَّهُمَّ صَلِّ وَسَلِّمْ عَلَى نَبِيِّنَا مُحَمَّدٍ</span>`,
-        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-emerald-300">📖 ﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾</span>`,
+        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-emerald-300">📖 ﴿فَاذْكُرُونِي أَذْكُرْكُمْ وَاشْكُرُوا لِي وَلَا تَكْفُرُونِ﴾</span>`,
+        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-[var(--gold-bright)]">🤲 اللَّهُمَّ لَا سَهْلَ إِلَّا مَا جَعَلْتَهُ سَهْلًا</span>`,
+        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-amber-300">📖 ﴿وَقُل رَّبِّ زِدْنِي عِلْمًا﴾</span>`,
+        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-emerald-300">✨ اللَّهُمَّ صَلِّ وَسَلِّمْ وَبَارِكْ عَلَى نَبِيِّنَا مُحَمَّدٍ</span>`,
+        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-[var(--gold-bright)]">📖 ﴿وَمَا تَوْفِيقِي إِلَّا بِاللَّهِ عَلَيْهِ تَوَكَّلْتُ وَإِلَيْهِ أُنِيبُ﴾</span>`,
         `<span class="mx-6 text-xs sm:text-sm font-black text-white" dir="ltr">⚡ Done by <span class="kw-highlight">Lester Crest</span></span>`,
+        `<span class="mx-6 text-xs sm:text-sm font-extrabold text-emerald-300">📖 ﴿أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ﴾</span>`,
         `<span class="mx-6 text-xs sm:text-sm font-extrabold text-[var(--gold-bright)]">💎 لَا حَوْلَ وَلَا قُوَّةَ إِلَّا بِاللَّهِ الْعَلِيِّ الْعَظِيمِ</span>`
     ].join('');
 
     const dhikrBar = (id) => `
-        <div id="${id}" onclick="rotateGlobalAdhkar()" class="cursor-pointer app-card rounded-2xl px-4 py-2.5 border border-amber-500/35 flex justify-between items-center gap-2 text-xs font-extrabold">
-            <div class="flex items-center gap-2"><span>🤲</span><span class="text-emerald-300">ذكر وتوفيق:</span><span class="live-dhikr-text text-[var(--gold-bright)] transition-opacity duration-200">${MED26_ADHKAR_LIST[2]}</span></div>
-            <span class="text-[10px] text-[var(--text-muted)] shrink-0">اضغط لذكر آخر 🔄</span>
+        <div id="${id}" onclick="rotateGlobalAdhkar()" class="cursor-pointer app-card rounded-2xl px-4 py-2 border border-amber-500/35 flex justify-between items-center gap-2 text-xs font-extrabold">
+            <div class="flex items-center gap-2 min-w-0"><span>🤲</span><span class="text-emerald-300 shrink-0">ذكر:</span><span class="live-dhikr-text text-[var(--gold-bright)] truncate">${initDhikr}</span></div>
+            <span class="text-[10px] text-[var(--text-muted)] shrink-0">التالي 🔄</span>
         </div>`;
 
     const buzzHtml = BUZZWORDS_DATA.map(([k, v]) => `
@@ -319,6 +422,9 @@ function formatPomoTime(sec) {
         <div class="fog-layer fog-bottom-glow"></div>
     </div>
 
+    <!-- شريط التقدّم النحيف المثبّت أعلى شاشة الأسئلة (3px) -->
+    <div id="trainer-top-progress-wrap" class="hidden"><div id="trainer-top-progress-bar"></div></div>
+
     <div id="disclaimer-modal" ${isSubPage ? 'style="display:none;"' : ''}></div>
 
     <header id="main-header" class="sticky top-0 z-40 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/95">
@@ -334,8 +440,8 @@ function formatPomoTime(sec) {
                 </div>
             </div>
 
-            <div id="top-dhikr-pill" onclick="rotateGlobalAdhkar()" title="اضغط للذكر التالي" class="cursor-pointer bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-extrabold text-[var(--gold-bright)] flex items-center gap-1.5 transition">
-                <span>📿</span><span class="live-dhikr-text transition-opacity duration-200">${MED26_ADHKAR_LIST[0]}</span>
+            <div id="top-dhikr-pill" onclick="rotateGlobalAdhkar()" title="اضغط للذكر التالي" class="cursor-pointer bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-extrabold text-[var(--gold-bright)] flex items-center gap-1.5 transition max-w-[420px]">
+                <span class="shrink-0">📿</span><span class="live-dhikr-text truncate transition-opacity duration-200">${initDhikr}</span>
             </div>
 
             <button id="top-user-badge" onclick="changeUsernamePrompt()" class="pill-btn px-3 py-1.5 rounded-2xl text-xs font-extrabold flex items-center gap-2 shadow-sm">
@@ -346,22 +452,23 @@ function formatPomoTime(sec) {
             <!-- قائمة أدواتي العلوية للجوال -->
             <div id="mob-tools-dropdown-wrap" class="relative md:hidden">
                 <button type="button" onclick="document.getElementById('mob-tools-menu').classList.toggle('hidden')" class="pill-btn px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1"><span>⚙️ أدواتي</span><span class="text-[9px]">▼</span></button>
-                <div id="mob-tools-menu" class="hidden absolute left-0 mt-2 w-60 bg-[var(--bg-card)] border-2 border-[var(--gold-primary)] rounded-2xl shadow-2xl p-2 z-50 space-y-1 text-right">
+                <div id="mob-tools-menu" class="hidden absolute left-0 mt-2 w-64 bg-[var(--bg-card)] border-2 border-[var(--gold-primary)] rounded-2xl shadow-2xl p-2 z-50 space-y-1 text-right">
                     <button id="mob-custom" onclick="switchView('custom');document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>🎯 التدريب المخصص</span><span>⬅️</span></button>
                     <button id="mob-fav" onclick="startTraining({source:'bookmarks'});document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-300"><span>⭐ المفضلة (<span id="mob-fav-count">0</span>)</span><span>⭐</span></button>
                     <button id="mob-sim" onclick="startExamSimulator();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>⏱️ المحاكي (18 محطة)</span><span>🚀</span></button>
                     <button onclick="startBlitzMode();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-300"><span>⚡ تحدي 60 ثانية (Blitz)</span><span>🔥</span></button>
+                    <button onclick="createDirectFriendChallenge();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-emerald-300"><span>⚔️ تحدي صاحبي (1v1)</span><span>🏆</span></button>
                     <button onclick="startTraining({source:'mistakes'});document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-rose-300"><span>🔁 جلسة مراجعة أخطائي (2×)</span><span>🎯</span></button>
                     <button onclick="toggleMistakeToastsPref();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-200"><span id="mob-toggle-mistake-toasts-label">🔕 إيقاف إشعارات الأخطاء نهائياً</span><span>💬</span></button>
                     <button onclick="togglePomodoroVisibility();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-emerald-300"><span>🍅 إظهار / إخفاء بومودورو</span><span>⏱️</span></button>
                     <button onclick="printCustomPDF('both');document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>🖨️ طباعة أخطائي ومفضلتي PDF</span><span>📄</span></button>
                     <button onclick="changeUsernamePrompt();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-300"><span>🔑 اسمي وكود المزامنة</span><span>👤</span></button>
-                    <button onclick="toggleTheme();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>☀️ / 🌙 تبديل المظهر</span><span>🎨</span></button>
+                    <button onclick="toggleTheme();document.getElementById('mob-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span id="mob-theme-label">🖤 تبديل المظهر (داكن/AMOLED/فاتح)</span><span>🎨</span></button>
                     <a href="https://t.me/Med26JU_bot" target="_blank" class="w-full text-right px-3 py-2 rounded-xl text-xs font-extrabold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-[var(--gold-bright)] border-t border-[var(--border-color)] pt-2"><span>✈️ بوت الدفعة</span><span dir="ltr">@Med26JU_bot</span></a>
                 </div>
             </div>
 
-            <!-- شريط التنقل العلوي للجوال (بديل الشريط السفلي) -->
+            <!-- شريط التنقل العلوي للجوال -->
             <div id="mobile-top-nav-row" class="md:hidden w-full pt-1">
                 <div id="mobile-top-nav" class="grid grid-cols-5 gap-1 bg-[var(--bg-main)]/85 border border-[var(--border-color)] p-1 rounded-2xl">
                     <button onclick="switchView('home')" id="mob-home" class="pill-btn ${defView === 'home' ? 'active' : ''} py-1.5 px-1 rounded-xl flex flex-col items-center justify-center text-[10px] font-extrabold leading-tight"><span class="text-xs">🏠</span><span>الرئيسية</span></button>
@@ -384,12 +491,13 @@ function formatPomoTime(sec) {
                         <button type="button" onclick="document.getElementById('my-tools-menu').classList.toggle('hidden')" class="pill-btn px-3.5 py-2 rounded-xl text-xs lg:text-sm font-black flex items-center gap-1.5"><span>⚙️ أدواتي</span><span class="text-[10px]">▼</span></button>
                         <div id="my-tools-menu" class="hidden absolute left-0 mt-2 w-64 bg-[var(--bg-card)] border-2 border-[var(--gold-primary)] rounded-2xl shadow-2xl p-2 z-50 space-y-1 text-right">
                             <button onclick="switchView('custom');document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>🎯 إعداد التدريب المخصص</span><span>⬅️</span></button>
+                            <button onclick="createDirectFriendChallenge();document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-emerald-300"><span>⚔️ تحدي صاحبي (1v1)</span><span>🏆</span></button>
                             <button onclick="startTraining({source:'mistakes'});document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-rose-300"><span>🔁 جلسة مراجعة أخطائي (2×)</span><span>🎯</span></button>
                             <button onclick="toggleMistakeToastsPref();document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-200"><span id="toggle-mistake-toasts-label">🔕 إيقاف إشعارات الأخطاء نهائياً</span><span>💬</span></button>
                             <button onclick="togglePomodoroVisibility();document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-emerald-300"><span>🍅 إظهار / إخفاء مؤقت بومودورو</span><span>⏱️</span></button>
                             <button onclick="printCustomPDF('both');document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>🖨️ طباعة أخطائي ومفضلتي PDF</span><span>📄</span></button>
                             <button onclick="changeUsernamePrompt();document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-amber-300"><span>🔑 اسمي وكود مزامنة أجهزتي</span><span>👤</span></button>
-                            <button onclick="toggleTheme();document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span>☀️ / 🌙 تبديل المظهر (فاتح/داكن)</span><span>🎨</span></button>
+                            <button onclick="toggleTheme();document.getElementById('my-tools-menu').classList.add('hidden')" class="w-full text-right px-3 py-2 rounded-xl text-xs font-bold hover:bg-[var(--bg-secondary)] flex items-center justify-between"><span id="desktop-theme-label">🖤 تبديل المظهر (داكن/AMOLED/فاتح)</span><span>🎨</span></button>
                             <a href="https://t.me/Med26JU_bot" target="_blank" class="w-full text-right px-3 py-2 rounded-xl text-xs font-extrabold hover:bg-[var(--bg-secondary)] flex items-center justify-between text-[var(--gold-bright)] border-t border-[var(--border-color)] pt-2"><span>✈️ بوت الدفعة الرسمي</span><span dir="ltr">@Med26JU_bot</span></a>
                         </div>
                     </div>
@@ -398,66 +506,78 @@ function formatPomoTime(sec) {
         </div>
     </header>
 
-    <main class="flex-grow max-w-[1440px] w-[95%] mx-auto py-4 sm:py-7 space-y-5 sm:space-y-7 relative z-10">
+    <main class="flex-grow max-w-[1440px] w-[95%] mx-auto py-3.5 sm:py-6 space-y-4 sm:space-y-6 relative z-10">
 
-        <!-- 1. الرئيسية -->
-        <section id="view-home" class="${defView === 'home' ? '' : 'hidden'} space-y-5 sm:space-y-7">
-            <div class="app-card rounded-2xl px-4 py-3 sm:px-6 sm:py-3.5 flex flex-wrap justify-between items-center gap-3 border border-amber-500/40">
-                <div class="flex items-center gap-2.5"><span class="text-lg sm:text-xl">⏳</span><span class="text-xs sm:text-sm font-extrabold text-[var(--gold-bright)]">العد التنازلي لاختبار F2 OSPE (27/12 - 8:00 ص):</span></div>
-                <div class="flex items-center gap-2 sm:gap-3 text-center" dir="ltr">
-                    <div class="bg-[var(--bg-secondary)] px-2.5 py-1 rounded-xl border border-[var(--border-color)] min-w-[52px]"><span id="cd-days" class="text-sm sm:text-lg font-black text-[var(--gold-bright)]">00</span><span class="block text-[9px] text-[var(--text-muted)]">DAYS</span></div>
-                    <div class="bg-[var(--bg-secondary)] px-2.5 py-1 rounded-xl border border-[var(--border-color)] min-w-[52px]"><span id="cd-hours" class="text-sm sm:text-lg font-black text-white">00</span><span class="block text-[9px] text-[var(--text-muted)]">HRS</span></div>
-                    <div class="bg-[var(--bg-secondary)] px-2.5 py-1 rounded-xl border border-[var(--border-color)] min-w-[52px]"><span id="cd-mins" class="text-sm sm:text-lg font-black text-white">00</span><span class="block text-[9px] text-[var(--text-muted)]">MIN</span></div>
-                    <div class="bg-[var(--bg-secondary)] px-2.5 py-1 rounded-xl border border-[var(--border-color)] min-w-[52px]"><span id="cd-secs" class="text-sm sm:text-lg font-black text-amber-400">00</span><span class="block text-[9px] text-[var(--text-muted)]">SEC</span></div>
+        <!-- 1. الرئيسية (نظام Bento متوازن بـ 3 أعمدة على البيسي بدون فراغ في المنتصف) -->
+        <section id="view-home" class="${defView === 'home' ? '' : 'hidden'} space-y-4 sm:space-y-6">
+
+            <div id="bento-hero-upgraded" class="app-card rounded-3xl p-4 sm:p-6">
+                <img data-logo alt="" class="card-watermark">
+                <div class="relative z-10 grid grid-cols-1 xl:grid-cols-12 gap-4 items-center">
+
+                    <!-- العمود الأيمن: الترحيب والعنوان والأزرار السريعة -->
+                    <div class="xl:col-span-5 space-y-3 text-center xl:text-right">
+                        <div class="flex flex-wrap items-center justify-center xl:justify-start gap-2">
+                            <span class="text-xs sm:text-sm font-extrabold text-[var(--text-muted)]">مرحباً بك يا دكتور،</span>
+                            <span id="bento-welcome-name" class="text-sm sm:text-lg font-black text-[var(--gold-bright)]">${savedUser}</span>
+                            <span id="bento-welcome-rank" class="px-2.5 py-0.5 rounded-full text-[11px] font-black border text-sky-300 border-sky-400/40 bg-sky-500/15">🌱 مبتدئ</span>
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[10px] sm:text-[11px] font-bold text-[var(--gold-bright)]">تجميعات 2018 – 2025</span>
+                        </div>
+                        <h2 class="text-lg sm:text-2xl font-black leading-snug">بنك التجميعات والتدريبات التفاعلي لـ Foundation 2</h2>
+                        <div class="flex flex-wrap justify-center xl:justify-start gap-2 pt-0.5">
+                            <button onclick="resumeLastSession()" class="w-full sm:w-auto gold-btn px-4 py-2.5 rounded-2xl text-right flex items-center justify-between sm:justify-start gap-2.5 shadow-lg">
+                                <span class="text-base">▶️</span>
+                                <div><div class="text-xs sm:text-sm font-black leading-tight">أكمل من حيث توقفت</div><div id="continue-session-subtext" class="text-[10px] font-bold opacity-85">ابدأ بالمحطات الأكثر تكراراً</div></div>
+                            </button>
+                            <button onclick="switchView('atlas')" class="pill-btn px-3 py-2 rounded-xl text-xs font-black">🖼️ الأطلس</button>
+                            <button onclick="startBlitzMode()" class="pill-btn px-3 py-2 rounded-xl text-xs font-extrabold text-amber-300">⚡ 60ث</button>
+                            <button onclick="printCustomPDF('both')" class="pill-btn px-3 py-2 rounded-xl text-xs font-bold">🖨️ PDF</button>
+                        </div>
+                    </div>
+
+                    <!-- العمود الأوسط: العدّاد التنازلي + شريط الإحصائيات الثلاثية (يملى الفراغ بتوازن) -->
+                    <div class="xl:col-span-4 space-y-2.5">
+                        <div class="bg-[var(--bg-secondary)]/90 border border-amber-500/40 rounded-2xl px-3.5 py-2.5 flex flex-wrap justify-between items-center gap-2">
+                            <div class="flex items-center gap-1.5"><span class="text-sm sm:text-base">⏳</span><span class="text-[11px] sm:text-xs font-extrabold text-[var(--gold-bright)]">اختبار F2 OSPE:</span></div>
+                            <div class="flex items-center gap-1.5 text-center" dir="ltr">
+                                <div class="bg-[var(--bg-card)] px-2 py-0.5 rounded-lg border border-[var(--border-color)] min-w-[44px]"><span id="cd-days" class="text-xs sm:text-sm font-black text-[var(--gold-bright)]">00</span><span class="block text-[8px] text-[var(--text-muted)]">DAYS</span></div>
+                                <div class="bg-[var(--bg-card)] px-2 py-0.5 rounded-lg border border-[var(--border-color)] min-w-[44px]"><span id="cd-hours" class="text-xs sm:text-sm font-black text-[var(--text-main)]">00</span><span class="block text-[8px] text-[var(--text-muted)]">HRS</span></div>
+                                <div class="bg-[var(--bg-card)] px-2 py-0.5 rounded-lg border border-[var(--border-color)] min-w-[44px]"><span id="cd-mins" class="text-xs sm:text-sm font-black text-[var(--text-main)]">00</span><span class="block text-[8px] text-[var(--text-muted)]">MIN</span></div>
+                                <div class="bg-[var(--bg-card)] px-2 py-0.5 rounded-lg border border-[var(--border-color)] min-w-[44px]"><span id="cd-secs" class="text-xs sm:text-sm font-black text-amber-400">00</span><span class="block text-[8px] text-[var(--text-muted)]">SEC</span></div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div class="bg-[var(--bg-secondary)]/85 border border-[var(--border-color)] rounded-xl px-2.5 py-2 text-center"><div class="text-[9px] text-[var(--text-muted)] font-bold">سلسلة الإجابات</div><div id="hero-quick-streak" class="text-[11px] sm:text-xs font-black text-amber-300 mt-0.5">🔥 0 متتالية</div></div>
+                            <div onclick="openLabChecklistModal()" class="bg-[var(--bg-secondary)]/85 border border-[var(--border-color)] rounded-xl px-2.5 py-2 text-center cursor-pointer hover:border-emerald-400"><div class="text-[9px] text-[var(--text-muted)] font-bold">ختم اللابات</div><div id="hero-quick-labs" class="text-[11px] sm:text-xs font-black text-emerald-400 mt-0.5">✅ 0/12 لاب</div></div>
+                            <div onclick="switchView('scoreboard')" class="bg-[var(--bg-secondary)]/85 border border-[var(--border-color)] rounded-xl px-2.5 py-2 text-center cursor-pointer hover:border-amber-400"><div class="text-[9px] text-[var(--text-muted)] font-bold">ترتيبك بالدفعة</div><div id="hero-quick-rank" class="text-[11px] sm:text-xs font-black text-[var(--gold-bright)] mt-0.5">🏆 #--</div></div>
+                        </div>
+                    </div>
+
+                    <!-- العمود الأيسر: مربعات الأرقام الأربعة (2×2 على البيسي و 4×1 على الجوال والآيباد) -->
+                    <div class="xl:col-span-3 grid grid-cols-4 xl:grid-cols-2 gap-2">
+                        <div class="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-2.5 text-center"><div class="text-base sm:text-xl font-black text-[var(--gold-bright)]" id="stat-total">0</div><div class="text-[10px] text-[var(--text-muted)] font-bold">المحطات</div></div>
+                        <div class="bg-[var(--bg-secondary)] border border-emerald-500/40 rounded-xl p-2.5 text-center"><div class="text-base sm:text-xl font-black text-emerald-400" id="stat-mastered">0</div><div class="text-[10px] text-emerald-300 font-bold">أتقنتها</div></div>
+                        <div onclick="startTraining({source:'bookmarks'})" class="bg-[var(--bg-secondary)] border border-amber-400/50 rounded-xl p-2.5 text-center cursor-pointer hover:bg-amber-500/10"><div class="text-base sm:text-xl font-black text-amber-300" id="stat-bookmarks">0</div><div class="text-[10px] text-amber-200 font-bold">⭐ المفضلة</div></div>
+                        <div onclick="startTraining({source:'mistakes'})" class="bg-[var(--bg-secondary)] border border-red-400/40 rounded-xl p-2.5 text-center cursor-pointer hover:bg-red-500/10"><div class="text-base sm:text-xl font-black text-red-400" id="stat-mistakes">0</div><div class="text-[10px] text-red-300 font-bold">🎯 أخطائي</div></div>
+                    </div>
                 </div>
             </div>
 
-            <div id="home-adhkar-oasis" class="app-card rounded-2xl px-4 py-3 sm:px-6 sm:py-3.5 border border-emerald-500/40 flex flex-col lg:flex-row justify-between items-center gap-3">
-                <div class="flex items-center gap-2 text-center sm:text-right">
-                    <span class="text-lg">📿</span><span class="text-xs sm:text-sm font-black text-emerald-300">واحة الأذكار أثناء المذاكرة:</span>
-                    <span class="live-dhikr-text text-xs sm:text-sm font-bold text-[var(--gold-bright)] transition-opacity duration-200">${MED26_ADHKAR_LIST[0]}</span>
+            <!-- واحة الأذكار المدمجة القابلة للطي -->
+            <div id="home-adhkar-oasis" class="app-card rounded-2xl px-3.5 py-2.5 sm:px-5 border border-emerald-500/40 space-y-2.5">
+                <div class="flex justify-between items-center gap-2">
+                    <div onclick="rotateGlobalAdhkar()" class="cursor-pointer flex items-center gap-2 min-w-0 flex-1">
+                        <span class="text-base shrink-0">📿</span>
+                        <span class="text-xs font-black text-emerald-300 shrink-0 hidden sm:inline">واحة الأذكار:</span>
+                        <span class="live-dhikr-text text-xs sm:text-sm font-bold text-[var(--gold-bright)] truncate">${initDhikr}</span>
+                    </div>
+                    <button type="button" onclick="toggleAdhkarDrawer()" class="pill-btn px-2.5 py-1 rounded-xl text-[10px] font-black text-emerald-300 shrink-0"><span id="adhkar-toggle-arrow">${adhkarOpen ? 'طي ▴' : 'تسبيح ▾'}</span></button>
                 </div>
-                <div class="flex flex-wrap justify-center items-center gap-1.5">
+                <div id="adhkar-collapsible-body" class="${adhkarOpen ? '' : 'hidden'} flex flex-wrap justify-center sm:justify-start items-center gap-1.5 pt-2 border-t border-[var(--border-color)]">
                     <button onclick="incrementTasbeehCounter(this,'1')" class="pill-btn px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5"><span>سبحان الله وبحمده</span><span class="tasbeeh-count px-1.5 rounded-full bg-emerald-500/25 text-emerald-300 font-black">${t1}</span></button>
                     <button onclick="incrementTasbeehCounter(this,'2')" class="pill-btn px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5"><span>أستغفر الله</span><span class="tasbeeh-count px-1.5 rounded-full bg-amber-500/25 text-amber-300 font-black">${t2}</span></button>
                     <button onclick="incrementTasbeehCounter(this,'3')" class="pill-btn px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5"><span>اللهم صلِّ على محمد</span><span class="tasbeeh-count px-1.5 rounded-full bg-sky-500/25 text-sky-300 font-black">${t3}</span></button>
                     <button onclick="incrementTasbeehCounter(this,'4')" class="pill-btn px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5"><span>لا حول ولا قوة إلا بالله</span><span class="tasbeeh-count px-1.5 rounded-full bg-purple-500/25 text-purple-300 font-black">${t4}</span></button>
-                </div>
-            </div>
-
-            <div id="bento-hero-upgraded" class="app-card rounded-3xl p-5 sm:p-7 md:p-8 flex flex-col lg:flex-row justify-between items-center gap-5">
-                <img data-logo alt="" class="card-watermark">
-                <div class="space-y-3 z-10 max-w-2xl text-center lg:text-right">
-                    <div class="space-y-3 pb-1">
-                        <div class="flex flex-wrap items-center justify-center lg:justify-start gap-2">
-                            <span class="text-sm sm:text-base font-extrabold text-[var(--text-muted)]">مرحباً بك يا دكتور،</span>
-                            <span id="bento-welcome-name" class="text-base sm:text-lg font-black text-[var(--gold-bright)]">${savedUser}</span>
-                            <span id="bento-welcome-rank" class="px-2.5 py-0.5 rounded-full text-xs font-black border text-sky-300 border-sky-400/40 bg-sky-500/15">🌱 مبتدئ</span>
-                        </div>
-                        <div class="grid grid-cols-3 gap-2 max-w-xl mx-auto lg:mx-0">
-                            <div class="bg-[var(--bg-secondary)]/90 border border-[var(--border-color)] rounded-xl px-3 py-2 text-center"><div class="text-[10px] text-[var(--text-muted)] font-bold">سلسلة الإجابات</div><div id="hero-quick-streak" class="text-xs sm:text-sm font-black text-amber-300 mt-0.5">🔥 0 متتالية</div></div>
-                            <div onclick="openLabChecklistModal()" class="bg-[var(--bg-secondary)]/90 border border-[var(--border-color)] rounded-xl px-3 py-2 text-center cursor-pointer hover:border-emerald-400"><div class="text-[10px] text-[var(--text-muted)] font-bold">ختم اللابات</div><div id="hero-quick-labs" class="text-xs sm:text-sm font-black text-emerald-400 mt-0.5">✅ 0/12 لاب</div></div>
-                            <div onclick="switchView('scoreboard')" class="bg-[var(--bg-secondary)]/90 border border-[var(--border-color)] rounded-xl px-3 py-2 text-center cursor-pointer hover:border-amber-400"><div class="text-[10px] text-[var(--text-muted)] font-bold">ترتيبك بالدفعة</div><div id="hero-quick-rank" class="text-xs sm:text-sm font-black text-[var(--gold-bright)] mt-0.5">🏆 #--</div></div>
-                        </div>
-                        <button onclick="resumeLastSession()" class="w-full sm:w-auto gold-btn px-6 py-3 rounded-2xl text-right flex items-center justify-between sm:justify-start gap-3 shadow-xl">
-                            <span class="text-xl">▶️</span>
-                            <div><div class="text-xs sm:text-sm font-black leading-tight">أكمل من حيث توقفت (Continue Session)</div><div id="continue-session-subtext" class="text-[10px] sm:text-[11px] font-bold opacity-85">ابدأ بالمحطات الأكثر تكراراً في الاختبار</div></div>
-                        </button>
-                    </div>
-                    <div class="inline-flex flex-wrap justify-center lg:justify-start items-center gap-2 px-3 py-1 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[11px] sm:text-xs font-bold text-[var(--gold-bright)]"><span>آخر تحديث: NOV 2026 • شامل تجميعات (2018 – 2025)</span></div>
-                    <h2 class="text-xl sm:text-3xl md:text-4xl font-black leading-snug">بنك التجميعات والتدريبات التفاعلي لـ Foundation 2</h2>
-                    <p class="text-xs sm:text-base text-[var(--text-muted)] leading-relaxed">تدرّب مع محاكي الـ 18 محطة (من 20 درجة)، وتحدي الـ 60 ثانية السريع، ورابط تحدي الأصدقاء، وطباعة ملف أخطائك وملاحظاتك كـ PDF.</p>
-                    <div class="pt-1 flex flex-wrap justify-center lg:justify-start gap-2">
-                        <button onclick="switchView('atlas')" class="gold-btn px-4 py-2 rounded-xl text-xs sm:text-sm font-black">🖼️ الأطلس البصري ومفاتيح البصم</button>
-                        <button onclick="startBlitzMode()" class="pill-btn px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold text-amber-300">⚡ تحدي الـ 60 ثانية (Blitz)</button>
-                        <button onclick="printCustomPDF('both')" class="pill-btn px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold">🖨️ طباعة ملف أخطائي ومفضلتي (PDF)</button>
-                    </div>
-                </div>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3.5 w-full lg:w-auto z-10">
-                    <div class="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-2xl p-3.5 sm:p-4 text-center"><div class="text-xl sm:text-2xl font-black text-[var(--gold-bright)]" id="stat-total">0</div><div class="text-[11px] text-[var(--text-muted)] mt-1 font-bold">إجمالي المحطات</div></div>
-                    <div class="bg-[var(--bg-secondary)] border border-emerald-500/40 rounded-2xl p-3.5 sm:p-4 text-center"><div class="text-xl sm:text-2xl font-black text-emerald-400" id="stat-mastered">0</div><div class="text-[11px] text-emerald-300 mt-1 font-bold">محطات أتقنتها</div></div>
-                    <div onclick="startTraining({source:'bookmarks'})" class="bg-[var(--bg-secondary)] border border-amber-400/50 rounded-2xl p-3.5 sm:p-4 text-center cursor-pointer hover:bg-amber-500/10"><div class="text-xl sm:text-2xl font-black text-amber-300" id="stat-bookmarks">0</div><div class="text-[11px] text-amber-200 mt-1 font-bold">⭐ المفضلة</div></div>
-                    <div onclick="startTraining({source:'mistakes'})" class="bg-[var(--bg-secondary)] border border-red-400/40 rounded-2xl p-3.5 sm:p-4 text-center cursor-pointer hover:bg-red-500/10"><div class="text-xl sm:text-2xl font-black text-red-400" id="stat-mistakes">0</div><div class="text-[11px] text-red-300 mt-1 font-bold">🎯 مراجعة أخطائي</div></div>
                 </div>
             </div>
 
@@ -466,7 +586,7 @@ function formatPomoTime(sec) {
                     <div class="flex flex-wrap justify-between items-center gap-2 border-b border-[var(--border-color)] pb-3">
                         <div>
                             <h3 class="text-base sm:text-xl font-black text-[var(--gold-bright)]">🎮 أطوار الاختبار والمنافسة (Game Modes)</h3>
-                            <p class="text-xs text-[var(--text-muted)] font-bold">اختر نمط التدريب المناسب لوقتك أو نافس زملاءك في نفس المحطات</p>
+                            <p class="text-xs text-[var(--text-muted)] font-bold">اختر نمط التدريب المناسب لوقتك أو نافس زملاءك وجهاً لوجه في تحدي 1v1</p>
                         </div>
                         <div class="flex gap-1.5">
                             <button onclick="startTraining({source:'bookmarks'})" class="pill-btn px-3 py-1.5 rounded-xl text-xs font-bold text-amber-300">⭐ المفضلة (<span id="fav-count-btn">0</span>)</button>
@@ -488,7 +608,7 @@ function formatPomoTime(sec) {
                         </div>
                     </div>
                     <div class="flex flex-wrap gap-2 pt-1">
-                        <button onclick="createDirectFriendChallenge()" class="flex-1 pill-btn py-2.5 px-4 rounded-xl text-xs font-black text-emerald-300">⚔️ إنشاء رابط تحدي صاحبي (18 محطة مشتركة)</button>
+                        <button onclick="createDirectFriendChallenge()" class="flex-1 pill-btn py-2.5 px-4 rounded-xl text-xs font-black text-emerald-300">⚔️ تحدي صاحبي 1v1 (العب ونافسه بنتيجتك ووقتك)</button>
                         <button onclick="startTraining({highYield:true})" class="flex-1 pill-btn py-2.5 px-4 rounded-xl text-xs font-black text-amber-300">🔥 مراجعة المحطات الأكثر تكراراً (High-Yield)</button>
                     </div>
                 </div>
@@ -545,11 +665,14 @@ function formatPomoTime(sec) {
             </div>
         </section>
 
-        <!-- 3. تقرير نقاط الضعف وبطاقة النتيجة -->
+        <!-- 3. تقرير نقاط الضعف وبطاقة النتيجة + ساحة مواجهة 1v1 -->
         <section id="view-report" class="hidden space-y-5 py-4">
             <div class="app-card max-w-4xl mx-auto rounded-3xl p-5 sm:p-9 space-y-6 border-2 border-[var(--gold-primary)]">
                 <img data-logo alt="" class="card-watermark">
                 <div class="relative z-10 space-y-6">
+                    <!-- بطاقة ساحة المواجهة 1v1 (تظهر تلقائياً عند وجود متحدّي أو عند إنشاء تحدي 1v1) -->
+                    <div id="vs-arena-card" class="hidden rounded-3xl p-5 sm:p-6 border-2 border-emerald-400/60 bg-gradient-to-br from-slate-900/95 via-slate-950/95 to-emerald-950/40 space-y-4 shadow-2xl"></div>
+
                     <div id="luxury-score-card" class="bg-gradient-to-br from-[#26211b] via-[#1c1814] to-[#2e261d] border-2 border-[#cfa96b] rounded-3xl p-6 sm:p-8 text-center space-y-4 shadow-2xl">
                         <div class="flex justify-between items-center border-b border-[#cfa96b]/30 pb-3"><img data-logo class="h-10 sm:h-12 object-contain"><span id="scorecard-mode-label" class="text-xs sm:text-sm font-black px-3 py-1 rounded-full gold-btn">محاكي الـ OSPE</span></div>
                         <div class="py-2 space-y-1"><div class="text-xs text-[#c4baa8] font-bold">الدرجة النهائية المعتمدة (من 20)</div><div id="report-score-20" class="text-4xl sm:text-6xl font-black text-[#ebd2a4]" dir="ltr">20 / 20</div><div id="report-score-badge" class="text-xs sm:text-sm font-extrabold text-emerald-400 pt-1">الأداء: ممتاز (100%)</div></div>
@@ -560,7 +683,7 @@ function formatPomoTime(sec) {
                         </div>
                         <div class="pt-3 flex flex-wrap justify-center gap-2.5">
                             <button onclick="downloadScoreCardImage()" class="gold-btn px-5 py-2.5 rounded-xl text-xs sm:text-sm font-black shadow-lg">📸 حفظ بطاقة النتيجة كصورة</button>
-                            <button onclick="shareCurrentChallengeLink()" class="pill-btn px-5 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold text-emerald-300">⚔️ تحدي صاحبي بنفس المحطات</button>
+                            <button onclick="shareCurrentChallengeLink(true)" class="pill-btn px-5 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold text-emerald-300 border-emerald-400/50">⚔️ نسخ رابط تحدي 1v1 بنتيجتي ووقتي</button>
                         </div>
                         <div dir="ltr" class="text-[11px] text-[#c4baa8] pt-1 font-bold">MED26 PORTAL • Done by Lester Crest</div>
                     </div>
@@ -632,7 +755,7 @@ function formatPomoTime(sec) {
                     <div class="text-sm font-bold">عدد المحطات المطابقة لاختياراتك: <span id="custom-match-count" class="text-xl font-black text-[var(--gold-bright)]">0</span></div>
                     <div class="flex flex-col sm:flex-row gap-2.5 w-full sm:w-auto">
                         <button onclick="launchCustomTraining()" class="w-full sm:w-auto gold-btn px-8 py-3 rounded-2xl text-sm font-black shadow-lg">🚀 ابدأ التدريب المخصص الآن</button>
-                        <button onclick="launchCustomFriendChallenge()" class="w-full sm:w-auto pill-btn px-6 py-3 rounded-2xl text-sm font-black text-emerald-300 border-emerald-500/50">⚔️ تحدي صاحبي بهذه الإعدادات</button>
+                        <button onclick="launchCustomFriendChallenge()" class="w-full sm:w-auto pill-btn px-6 py-3 rounded-2xl text-sm font-black text-emerald-300 border-emerald-500/50">⚔️ تحدي صاحبي 1v1 بهذه الإعدادات</button>
                     </div>
                 </div>
             </div>
@@ -649,12 +772,15 @@ function formatPomoTime(sec) {
                 <div id="streak-badge" class="hidden items-center gap-1.5 bg-gradient-to-r from-orange-600/30 to-amber-500/30 border border-amber-400 px-3 py-1 rounded-xl text-xs font-black text-amber-200"><span id="streak-text">🔥 سلسلة 3 صح!</span></div>
                 <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
                     <div id="exam-timer-box" class="hidden items-center gap-1.5 bg-amber-500/20 border border-amber-400 px-3 py-1 rounded-xl"><span id="exam-timer" class="text-sm sm:text-lg font-black text-amber-300">01:30</span></div>
-                    <button onclick="shareCurrentChallengeLink()" class="pill-btn px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-extrabold text-emerald-300">⚔️ تحدي صاحبي</button>
+                    <button onclick="shareCurrentChallengeLink(false)" class="pill-btn px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-extrabold text-emerald-300">⚔️ تحدي 1v1</button>
                     <button id="zen-mode-toggle-btn" type="button" onclick="toggleZenFocusMode()" class="pill-btn px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-extrabold text-amber-200 flex items-center gap-1"><span>🧘</span><span id="zen-btn-label" class="hidden sm:inline">وضع التركيز</span></button>
                     <span id="question-counter" class="text-xs sm:text-sm font-extrabold bg-[var(--bg-secondary)] px-3 py-1.5 rounded-xl border border-[var(--border-color)]">1 / 18</span>
-                    <button onclick="toggleTheme()" class="pill-btn px-2.5 py-1.5 rounded-xl text-xs font-bold">☀️/🌙</button>
+                    <button id="trainer-theme-btn" onclick="toggleTheme()" title="تبديل المظهر (داكن / AMOLED / فاتح)" class="pill-btn px-2.5 py-1.5 rounded-xl text-xs font-bold">🌙</button>
                 </div>
             </div>
+
+            <!-- شريط حالة تحدي 1v1 الحي أثناء الحل -->
+            <div id="vs-live-banner" class="hidden rounded-2xl px-4 py-2.5 border border-emerald-400/50 bg-emerald-950/35 text-xs sm:text-sm font-extrabold text-emerald-200 flex flex-wrap justify-between items-center gap-2"></div>
 
             <div id="timeout-toast" class="hidden bg-red-600/95 border border-red-300 text-white px-4 py-2.5 rounded-2xl text-center text-xs sm:text-sm font-extrabold">🔔 انتهى وقت المحطة! أُضيف السؤال لقسم «مراجعة أخطائي».</div>
             <div id="srs-toast" class="hidden bg-amber-500/95 border border-amber-200 text-black px-4 py-2 rounded-2xl text-center text-xs font-extrabold">🔁 تمت جدولة هذه المحطة لتظهر لك مجدداً بعد قليل!</div>
@@ -676,8 +802,8 @@ function formatPomoTime(sec) {
                         <span id="q-subject" class="px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase"></span>
                         <span id="q-lab" class="bg-[var(--bg-secondary)] border border-[var(--border-color)] px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-lg text-[10px] sm:text-xs font-bold"></span>
                         <span id="q-year" class="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-lg text-[10px] sm:text-xs font-extrabold"></span>
-                        <span id="q-highyield" class="hidden bg-red-500/20 text-red-300 border border-red-400/40 px-2.5 py-0.5 rounded-lg text-[10px] sm:text-xs font-extrabold">🔥 الأكثر تكراراً</span>
-                        <span id="q-compilation-tag" class="bg-sky-500/20 text-sky-300 border border-sky-400/40 px-2.5 py-0.5 rounded-lg text-[10px] sm:text-xs font-extrabold">📌 تجميعات سابقة</span>
+                        <span id="q-highyield" class="hidden bg-red-500/20 text-red-300 border border-red-400/40 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-lg text-[10px] sm:text-xs font-extrabold">🔥 الأكثر تكراراً</span>
+                        <span id="q-compilation-tag" class="bg-sky-500/20 text-sky-300 border border-sky-400/40 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-lg text-[10px] sm:text-xs font-extrabold">📌 تجميعات سابقة</span>
                         <span id="station-mistake-banner" class="hidden"></span>
                     </div>
                     <div id="q-sim-hidden-badge" class="hidden items-center gap-2 bg-amber-500/15 border border-amber-400/40 text-amber-200 px-3 py-1 rounded-xl text-xs font-extrabold">🔒 محطة اختبار محاكي (تم إخفاء المادة واللاب لمنع حرق الإجابة)</div>
@@ -688,7 +814,7 @@ function formatPomoTime(sec) {
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-7 my-4 sm:my-6 z-10 items-start">
+                <div id="station-body-grid" class="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-7 my-4 sm:my-6 z-10 items-start">
                     <div class="order-1 lg:order-2 lg:col-span-5 flex flex-col items-center w-full" id="q-img-col">
                         <div id="img-wrapper" class="w-full bg-[var(--bg-secondary)] border-2 border-[var(--border-color)] rounded-2xl sm:rounded-3xl p-2.5 sm:p-4 flex flex-col items-center justify-center relative">
                             <div id="loupe-container" class="relative w-full flex justify-center items-center overflow-hidden rounded-xl">
@@ -781,14 +907,34 @@ function formatPomoTime(sec) {
         </section>
     </main>
 
-    <div id="print-pdf-container" dir="rtl"></div>
-
-    <div id="zoom-modal" onclick="closeZoomModal()" class="fixed inset-0 bg-black/95 z-50 hidden items-center justify-center p-2 sm:p-4 cursor-zoom-out">
-        <img id="zoom-img" src="" class="max-w-[96vw] max-h-[90vh] object-contain rounded-2xl border-2 border-[var(--gold-primary)]">
+    <!-- شريط تنقّل سفلي ثابت ومصغّر داخل شاشة الأسئلة على الجوال فقط -->
+    <div id="mobile-trainer-sticky-bar" class="hidden md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[var(--bg-secondary)]/95 border-t border-[var(--border-color)] px-3 pt-2 flex items-center gap-2 shadow-2xl">
+        <button onclick="prevQuestion()" class="flex-1 pill-btn py-2.5 rounded-xl text-xs font-black text-center">➡️ السابق</button>
+        <button id="mob-sticky-fav-btn" onclick="toggleBookmarkCurrent()" class="pill-btn px-3.5 py-2.5 rounded-xl text-sm font-black shrink-0" title="المفضلة"><span id="mob-sticky-fav-icon">☆</span></button>
+        <button onclick="nextQuestion()" class="flex-1 gold-btn py-2.5 rounded-xl text-xs font-black text-center">التالي ⬅️</button>
     </div>
 
-    <button id="ai-floating-btn" onclick="openAiTutor()" class="fixed left-3 sm:left-5 bottom-4 md:bottom-6 z-40 gold-btn px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 text-xs sm:text-sm font-black">
-        <span class="text-base sm:text-lg">🤖</span><span>اسأل المناضل (AI)</span>
+    <div id="print-pdf-container" dir="rtl"></div>
+
+    <!-- نافذة تكبير العينات المطوّرة بالقرص والسحب (Pinch-to-Zoom & Pan) -->
+    <div id="zoom-modal" class="fixed inset-0 bg-black/95 z-[150] hidden flex-col">
+        <div class="flex items-center justify-between px-3 py-2.5 bg-black/75 border-b border-white/10 z-20 shrink-0" dir="ltr">
+            <div class="flex items-center gap-1.5">
+                <button type="button" onclick="adjustZoomScale(-0.4)" class="pill-btn px-3 py-1 rounded-xl text-xs font-black text-white">➖</button>
+                <span id="zoom-scale-label" class="text-xs font-black text-amber-300 min-w-[46px] text-center">100%</span>
+                <button type="button" onclick="adjustZoomScale(0.4)" class="pill-btn px-3 py-1 rounded-xl text-xs font-black text-white">➕</button>
+                <button type="button" onclick="resetZoomTransform()" class="pill-btn px-2.5 py-1 rounded-xl text-[11px] font-bold text-slate-200">إعادة ضبط</button>
+            </div>
+            <button type="button" onclick="closeZoomModal()" class="px-3.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black">إغلاق ✕</button>
+        </div>
+        <div id="zoom-stage" class="flex-1">
+            <img id="zoom-img" src="" alt="Zoomed Specimen" class="max-w-[96vw] max-h-[84vh] object-contain rounded-xl border border-[var(--gold-primary)]/60">
+        </div>
+        <div class="text-center py-1.5 text-[10px] text-slate-400 font-bold bg-black/70 shrink-0">كبّر بإصبعين أو بعجلة الفأرة • اسحب لتحريك العينة • نقرتين للتكبير السريع</div>
+    </div>
+
+    <button id="ai-floating-btn" onclick="openAiTutor()" title="اسأل المناضل (AI)" class="fixed left-3 sm:left-5 bottom-4 md:bottom-6 z-40 gold-btn px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 text-xs sm:text-sm font-black">
+        <span class="text-base sm:text-lg">🤖</span><span class="ai-btn-label">اسأل المناضل (AI)</span>
     </button>
 
     <aside id="ai-tutor-drawer" class="drawer-closed fixed top-0 left-0 h-[100dvh] w-[92vw] sm:w-[420px] z-[90] bg-[var(--bg-card)] border-r-2 border-[var(--gold-primary)] shadow-2xl flex flex-col justify-between">
@@ -814,7 +960,7 @@ function formatPomoTime(sec) {
 
     <div id="med26-pomo-widget" dir="rtl" class="${pomoHidden} fixed bottom-4 right-4 z-[110] select-none">
         <div id="pomo-collapsed" onclick="document.getElementById('pomo-expanded').classList.remove('hidden');this.classList.add('hidden');" class="cursor-pointer flex items-center gap-2 px-3.5 py-2 rounded-full bg-slate-900/95 border-2 border-amber-500/70 shadow-xl">
-            <span class="text-base">🍅</span><span id="pomo-mini-time" class="font-mono font-black text-sm text-amber-300">${formatPomoTime(pomoTimeLeft)}</span><span class="text-[11px] font-bold text-slate-200">بومودورو</span>
+            <span class="text-base leading-none">🍅</span><span id="pomo-mini-time" class="font-mono font-black text-sm text-amber-300">${formatPomoTime(pomoTimeLeft)}</span><span class="pomo-mob-hide text-[11px] font-bold text-slate-200">بومودورو</span>
             <button id="pomo-quick-dismiss-btn" type="button" onclick="event.stopPropagation();hidePomodoroWidget();" class="mr-1 w-5 h-5 rounded-full bg-rose-500/25 hover:bg-rose-500 text-rose-200 text-[10px] font-black flex items-center justify-center">✕</button>
         </div>
         <div id="pomo-expanded" class="hidden w-72 bg-slate-900/95 border-2 border-amber-500/60 rounded-2xl p-3.5 shadow-2xl text-white">
@@ -864,8 +1010,9 @@ function formatPomoTime(sec) {
             </div>
         </div>
     </footer>`;
-})();
 
+    updateThemeLabelsUI(localStorage.getItem('med26_theme_mode') || 'dark');
+})();
 // ================= 2. المؤثرات الصوتية والنطق الطبي =================
 function playToneSequence(freqs, type = 'sine', vol = 0.14, step = 0.08, dur = 0.24) {
     try {
@@ -896,7 +1043,7 @@ function speakMedicalText(rawHtml) {
 }
 function speakCurrentAnswer() { if (currentList[currentIndex]) speakMedicalText(currentList[currentIndex].a); }
 
-// ================= 3. العد التنازلي + الشعار + الأذكار + المظهر =================
+// ================= 3. العد التنازلي + الشعار + الأذكار + تبديل المظهر (3 أوضاع) =================
 function updateExamCountdown() {
     const dEl = document.getElementById('cd-days');
     if (!dEl) return;
@@ -934,11 +1081,12 @@ function incrementTasbeehCounter(btnEl, key) {
 }
 
 function toggleTheme() {
-    const isLight = document.body.classList.toggle('light-mode');
-    localStorage.setItem('med26_theme_mode', isLight ? 'light' : 'dark');
+    const cur = localStorage.getItem('med26_theme_mode') || 'dark';
+    const next = cur === 'dark' ? 'amoled' : cur === 'amoled' ? 'light' : 'dark';
+    applyThemeMode(next);
 }
 
-// ================= 4. أدوات العينة وتمرير الهيدر (بدون سحب لمس بين الأسئلة) =================
+// ================= 4. أدوات العينة + تكبير بالقرص والسحب (Pinch-to-Zoom) =================
 function rotateSpecimen() {
     currentRotation = (currentRotation + 90) % 360;
     const img = document.getElementById('q-image');
@@ -959,7 +1107,27 @@ function toggleLoupe() {
     if (btn) { btn.innerText = loupeActive ? '🔬 العدسة: مفعّلة' : '🔬 العدسة: إيقاف'; btn.classList.toggle('active', loupeActive); }
     if (!loupeActive && lens) lens.style.display = 'none';
 }
-(function bindSpecimenInteractions() {
+
+var zoomState = { scale: 1, x: 0, y: 0, dragging: false, sx: 0, sy: 0, startX: 0, startY: 0, pinchDist: 0, pinchScale: 1, lastTap: 0 };
+
+function applyZoomTransform(noAnim = false) {
+    const img = document.getElementById('zoom-img'), lbl = document.getElementById('zoom-scale-label');
+    if (!img) return;
+    if (zoomState.scale <= 1) { zoomState.scale = 1; zoomState.x = 0; zoomState.y = 0; }
+    img.classList.toggle('zoom-dragging', noAnim);
+    img.style.transform = `translate3d(${zoomState.x}px, ${zoomState.y}px, 0) scale(${zoomState.scale})`;
+    if (lbl) lbl.innerText = `${Math.round(zoomState.scale * 100)}%`;
+}
+function adjustZoomScale(delta) {
+    zoomState.scale = Math.max(1, Math.min(4.5, +(zoomState.scale + delta).toFixed(2)));
+    applyZoomTransform(false);
+}
+function resetZoomTransform() {
+    zoomState.scale = 1; zoomState.x = 0; zoomState.y = 0;
+    applyZoomTransform(false);
+}
+
+(function bindSpecimenAndZoomInteractions() {
     const img = document.getElementById('q-image'), lens = document.getElementById('magnifier-lens'), lc = document.getElementById('loupe-container');
     if (lc && img && lens) {
         const move = (e) => {
@@ -978,6 +1146,83 @@ function toggleLoupe() {
         lc.addEventListener('mousemove', move); lc.addEventListener('touchmove', move, { passive: false });
         lc.addEventListener('mouseleave', () => lens.style.display = 'none'); lc.addEventListener('touchend', () => lens.style.display = 'none');
     }
+
+    const stage = document.getElementById('zoom-stage'), zImg = document.getElementById('zoom-img');
+    if (stage && zImg) {
+        const dist = (t1, t2) => Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+
+        stage.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            adjustZoomScale(e.deltaY < 0 ? 0.3 : -0.3);
+        }, { passive: false });
+
+        zImg.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            if (zoomState.scale > 1.2) resetZoomTransform();
+            else { zoomState.scale = 2.4; applyZoomTransform(false); }
+        });
+
+        stage.addEventListener('mousedown', (e) => {
+            if (e.target === stage && zoomState.scale <= 1) { closeZoomModal(); return; }
+            if (zoomState.scale <= 1) return;
+            e.preventDefault();
+            zoomState.dragging = true;
+            zoomState.sx = e.clientX; zoomState.sy = e.clientY;
+            zoomState.startX = zoomState.x; zoomState.startY = zoomState.y;
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!zoomState.dragging) return;
+            zoomState.x = zoomState.startX + (e.clientX - zoomState.sx);
+            zoomState.y = zoomState.startY + (e.clientY - zoomState.sy);
+            applyZoomTransform(true);
+        });
+        window.addEventListener('mouseup', () => {
+            if (zoomState.dragging) { zoomState.dragging = false; applyZoomTransform(false); }
+        });
+
+        stage.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                zoomState.dragging = false;
+                zoomState.pinchDist = dist(e.touches[0], e.touches[1]);
+                zoomState.pinchScale = zoomState.scale;
+            } else if (e.touches.length === 1) {
+                const now = Date.now();
+                if (now - zoomState.lastTap < 280) {
+                    if (zoomState.scale > 1.2) resetZoomTransform();
+                    else { zoomState.scale = 2.4; applyZoomTransform(false); }
+                    zoomState.lastTap = 0;
+                    return;
+                }
+                zoomState.lastTap = now;
+                if (zoomState.scale > 1) {
+                    zoomState.dragging = true;
+                    zoomState.sx = e.touches[0].clientX; zoomState.sy = e.touches[0].clientY;
+                    zoomState.startX = zoomState.x; zoomState.startY = zoomState.y;
+                }
+            }
+        }, { passive: true });
+
+        stage.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2 && zoomState.pinchDist > 0) {
+                e.preventDefault();
+                const ratio = dist(e.touches[0], e.touches[1]) / zoomState.pinchDist;
+                zoomState.scale = Math.max(1, Math.min(4.5, zoomState.pinchScale * ratio));
+                applyZoomTransform(true);
+            } else if (e.touches.length === 1 && zoomState.dragging) {
+                e.preventDefault();
+                zoomState.x = zoomState.startX + (e.touches[0].clientX - zoomState.sx);
+                zoomState.y = zoomState.startY + (e.touches[0].clientY - zoomState.sy);
+                applyZoomTransform(true);
+            }
+        }, { passive: false });
+
+        stage.addEventListener('touchend', () => {
+            zoomState.dragging = false;
+            zoomState.pinchDist = 0;
+            applyZoomTransform(false);
+        }, { passive: true });
+    }
+
     let lastY = window.scrollY;
     window.addEventListener('scroll', () => {
         const h = document.getElementById('main-header');
@@ -985,6 +1230,7 @@ function toggleLoupe() {
         h.classList.toggle('header-hidden', window.scrollY > lastY && window.scrollY > 90);
         lastY = window.scrollY;
     }, { passive: true });
+
     document.addEventListener('click', e => {
         const w = document.getElementById('my-tools-dropdown-wrap'), m = document.getElementById('my-tools-menu');
         if (w && m && !w.contains(e.target)) m.classList.add('hidden');
@@ -1029,7 +1275,7 @@ function updateStatsUI() {
     if (topB) topB.innerHTML = `<span>👤</span><span id="top-username-text" class="text-[var(--gold-bright)] font-black">${user}</span><span class="px-2 py-0.5 rounded-full text-[10px] font-black border ${rank.color}">${rank.icon} ${rank.title}</span>`;
     setT('bento-welcome-name', user);
     const hr = document.getElementById('bento-welcome-rank');
-    if (hr) { hr.className = `px-2.5 py-0.5 rounded-full text-xs font-black border ${rank.color}`; hr.innerText = `${rank.icon} ${rank.title}`; }
+    if (hr) { hr.className = `px-2.5 py-0.5 rounded-full text-[11px] font-black border ${rank.color}`; hr.innerText = `${rank.icon} ${rank.title}`; }
 
     const bestS = Math.max(parseInt(localStorage.getItem('med26_best_streak') || '0', 10), currentStreak);
     setT('hero-quick-streak', `🔥 ${bestS} متتالية`);
@@ -1066,19 +1312,20 @@ function updateContinueSessionBtnUI() {
     if (!sub) return;
     try {
         const st = JSON.parse(localStorage.getItem('med26_last_session') || 'null');
-        if (st && st.ids?.length) { sub.innerText = `${st.subject} • ${st.lab} (المحطة ${(st.index || 0) + 1} من ${st.ids.length})`; return; }
+        if (st && st.ids?.length) { sub.innerText = `${st.subject} • ${st.lab} (${(st.index || 0) + 1}/${st.ids.length})`; return; }
     } catch (e) {}
-    sub.innerText = 'ابدأ بالمحطات الأكثر تكراراً في الاختبار (High-Yield)';
+    sub.innerText = 'ابدأ بالمحطات الأكثر تكراراً';
 }
 function resumeLastSession() {
     try {
         const st = JSON.parse(localStorage.getItem('med26_last_session') || 'null');
         const list = (st?.ids || []).map(id => questionsDB.find(q => q.id === id)).filter(Boolean);
         if (list.length) {
+            activeVsOpponent = null; is1v1CreatorMode = false;
             currentList = list; currentIndex = Math.min(st.index || 0, list.length - 1);
             isExamSimulator = false; isBlitzMode = false; activeTimerSeconds = 0; sessionResults = {}; sessionStartTime = Date.now();
             document.getElementById('trainer-title').innerText = st.title || 'استئناف الجلسة';
-            switchView('trainer'); renderQuestion(); return;
+            switchView('trainer'); updateVsLiveBanner(); renderQuestion(); return;
         }
     } catch (e) {}
     startTraining({ highYield: true });
@@ -1097,14 +1344,19 @@ function pickRandomSpotOfTheDay(forceRandom = false) {
     document.getElementById('spot-day-reveal-btn')?.classList.remove('hidden');
 }
 
-// ================= 6. التنقل والروابط الذكية =================
+// ================= 6. التنقل والروابط الذكية (يدعم روابط 1v1 المشفّرة) =================
 function getCurrentFileName() { return (window.location.pathname.split('/').pop() || 'index.html').toLowerCase(); }
 function switchView(view, skipHistoryPush = false) {
     if (window.MED26_MULTIPAGE_MODE && !skipHistoryPush && MULTI_PAGE_FILES[view]) {
         const target = MULTI_PAGE_FILES[view], cur = getCurrentFileName();
         if (cur !== target && !(cur === '' && target === 'index.html')) { window.location.href = target; return; }
     }
-    if (view !== 'trainer') toggleZenFocusMode(false);
+    const isTrainer = view === 'trainer';
+    if (!isTrainer) toggleZenFocusMode(false);
+    document.body.classList.toggle('in-trainer-view', isTrainer);
+    document.getElementById('trainer-top-progress-wrap')?.classList.toggle('hidden', !isTrainer);
+    document.getElementById('mobile-trainer-sticky-bar')?.classList.toggle('hidden', !isTrainer);
+
     clearInterval(timerInterval);
     document.getElementById('f2-checklist-modal')?.classList.add('hidden');
     ['exam-timer-box', 'timeout-toast', 'srs-toast', 'smart-mistake-toast'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
@@ -1114,7 +1366,7 @@ function switchView(view, skipHistoryPush = false) {
         document.getElementById(`mob-${v}`)?.classList.toggle('active', view === v);
     });
     const mh = document.getElementById('main-header');
-    if (mh) { if (view === 'trainer') mh.classList.add('hidden'); else mh.classList.remove('hidden', 'header-hidden'); }
+    if (mh) { if (isTrainer) mh.classList.add('hidden'); else mh.classList.remove('hidden', 'header-hidden'); }
     if (PAGE_TITLES_MAP[view]) document.title = PAGE_TITLES_MAP[view];
     if (!skipHistoryPush && !isHandlingRouteChange) {
         const h = view === 'home' ? '#/home' : `#/${view}`;
@@ -1126,6 +1378,23 @@ function switchView(view, skipHistoryPush = false) {
     if (view === 'scoreboard') renderScoreboardLists();
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
+function updateVsLiveBanner() {
+    const el = document.getElementById('vs-live-banner');
+    if (!el) return;
+    if (activeVsOpponent) {
+        el.className = 'rounded-2xl px-4 py-2.5 border border-emerald-400/60 bg-emerald-950/40 text-xs sm:text-sm font-extrabold text-emerald-200 flex flex-wrap justify-between items-center gap-2';
+        el.innerHTML = `<span>⚔️ مواجهة 1v1 ضد <strong class="text-amber-300">${activeVsOpponent.n}</strong></span><span class="px-2.5 py-0.5 rounded-xl bg-black/35 text-[11px] text-amber-200">الهدف: أعلى من ${activeVsOpponent.s}/${activeVsOpponent.t || currentList.length} (أو أسرع من ${formatSecMMSS(activeVsOpponent.sec)})</span>`;
+        el.classList.remove('hidden');
+    } else if (is1v1CreatorMode) {
+        el.className = 'rounded-2xl px-4 py-2.5 border border-amber-400/50 bg-amber-950/35 text-xs sm:text-sm font-extrabold text-amber-200 flex flex-wrap justify-between items-center gap-2';
+        el.innerHTML = `<span>⚔️ وضع إنشاء تحدي 1v1</span><span class="text-[11px] opacity-90">أكمل المحطات الآن ليتم توليد رابط التحدي المشفّر باسمك ونتيجتك ووقتك!</span>`;
+        el.classList.remove('hidden');
+    } else {
+        el.classList.add('hidden');
+    }
+}
+
 function acceptDisclaimer() {
     sessionStorage.setItem('med26_session_agreed', '1');
     document.documentElement.classList.add('session-agreed');
@@ -1134,15 +1403,24 @@ function acceptDisclaimer() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('challenge')) {
         const matched = params.get('challenge').split(',').map(n => questionsDB.find(q => q.id === parseInt(n, 10))).filter(Boolean);
-        if (matched.length) { startExamSimulator(matched, '⚔️ تحدي الأصدقاء المشترك'); return; }
+        if (matched.length) {
+            const opp = decodeVsPayload(params.get('vs'));
+            startExamSimulator(
+                matched,
+                opp ? `⚔️ مواجهة 1v1 ضد ${opp.n} (${matched.length} محطة)` : `⚔️ تحدي 1v1 المشترك (${matched.length} محطة)`,
+                { opponent: opp, creatorMode: !opp }
+            );
+            return;
+        }
     }
     const stId = parseInt(params.get('station'), 10);
     if (stId) {
         const idx = questionsDB.findIndex(q => q.id === stId);
         if (idx !== -1) {
+            activeVsOpponent = null; is1v1CreatorMode = false;
             currentList = [...questionsDB]; currentIndex = idx; isExamSimulator = false; isBlitzMode = false; activeTimerSeconds = 0; sessionResults = {}; sessionStartTime = Date.now();
             document.getElementById('trainer-title').innerText = '🔗 محطة مشتركة';
-            switchView('trainer'); renderQuestion();
+            switchView('trainer'); updateVsLiveBanner(); renderQuestion();
         }
     }
 }
@@ -1175,8 +1453,18 @@ function filterAtlas(sub) {
     document.querySelectorAll('#atlas-filter-bar button').forEach(b => b.classList.toggle('active', b.dataset.sub === sub));
     renderAtlasGrid();
 }
+function renderAtlasSkeleton(grid) {
+    grid.innerHTML = Array.from({ length: 6 }).map(() => `
+        <div class="app-card rounded-2xl p-4 space-y-3">
+            <div class="flex justify-between gap-2"><div class="med26-skel h-4 w-24"></div><div class="med26-skel h-4 w-28"></div></div>
+            <div class="med26-skel h-44 w-full"></div>
+            <div class="med26-skel h-12 w-full"></div>
+            <div class="flex justify-between gap-2 pt-1"><div class="med26-skel h-7 w-24"></div><div class="med26-skel h-7 w-28"></div></div>
+        </div>`).join('');
+}
 function renderAtlasGrid() {
     const grid = document.getElementById('atlas-grid'); if (!grid) return;
+    if (!Array.isArray(questionsDB) || !questionsDB.length) { renderAtlasSkeleton(grid); return; }
     const query = (document.getElementById('atlas-search')?.value || '').toLowerCase().trim(), seen = new Set();
     const filtered = questionsDB.filter(q => {
         if (q.noSample || (currentAtlasFilter !== 'ALL' && q.subject !== currentAtlasFilter)) return false;
@@ -1202,9 +1490,10 @@ function renderAtlasGrid() {
 function openStationFromAtlas(qId) {
     const idx = questionsDB.findIndex(q => q.id === qId);
     if (idx === -1) return;
+    activeVsOpponent = null; is1v1CreatorMode = false;
     currentList = [...questionsDB]; currentIndex = idx; isExamSimulator = false; isBlitzMode = false; activeTimerSeconds = 0; sessionResults = {}; sessionStartTime = Date.now();
     document.getElementById('trainer-title').innerText = '🖼️ تدريب من الأطلس البصري';
-    switchView('trainer'); renderQuestion();
+    switchView('trainer'); updateVsLiveBanner(); renderQuestion();
 }
 
 function getCustomFilteredList() {
@@ -1233,12 +1522,13 @@ function launchCustomTraining() {
     let list = getCustomFilteredList();
     if (!list.length) { alert('يرجى اختيار مادة واحدة على الأقل لتوليد الأسئلة.'); return; }
     if (document.getElementById('custom-shuffle')?.checked) list = [...list].sort(() => Math.random() - 0.5);
+    activeVsOpponent = null; is1v1CreatorMode = false;
     currentList = list.slice(0, parseInt(document.getElementById('custom-limit')?.value || '999', 10));
     currentIndex = 0; sessionResults = {}; sessionStartTime = Date.now(); currentStreak = 0; maxSessionStreak = 0; isBlitzMode = false;
     activeTimerSeconds = parseInt(document.getElementById('custom-timer')?.value || '0', 10);
     isExamSimulator = activeTimerSeconds > 0; updateStreakUI();
     document.getElementById('trainer-title').innerText = `🎯 تدريب مخصص (${currentList.length} محطة)`;
-    switchView('trainer'); playExamStartSound();
+    switchView('trainer'); updateVsLiveBanner(); playExamStartSound();
     if (activeTimerSeconds > 0) { document.getElementById('exam-timer-box').classList.remove('hidden'); document.getElementById('exam-timer-box').classList.add('flex'); resetStationTimer(); }
     renderQuestion();
 }
@@ -1246,14 +1536,14 @@ function launchCustomFriendChallenge() {
     let list = getCustomFilteredList();
     if (!list.length) { alert('يرجى اختيار مادة واحدة على الأقل لإنشاء التحدي.'); return; }
     if (document.getElementById('custom-shuffle')?.checked) list = [...list].sort(() => Math.random() - 0.5);
-    const sel = list.slice(0, parseInt(document.getElementById('custom-limit')?.value || '18', 10));
-    const url = `${window.location.origin}${window.location.pathname}?challenge=${sel.map(q => q.id).join(',')}`;
-    navigator.clipboard.writeText(url).then(() => alert(`⚔️ تم نسخ رابط التحدي المخصص (${sel.length} محطة)!`));
-    startExamSimulator(sel, `⚔️ تحدي مخصص مع صاحبي (${sel.length} محطة)`);
+    const lim = parseInt(document.getElementById('custom-limit')?.value || '18', 10);
+    const sel = list.slice(0, Math.min(lim === 999 ? 18 : lim, 25));
+    startExamSimulator(sel, `⚔️ تحدي 1v1 مخصص (${sel.length} محطة)`, { opponent: null, creatorMode: true });
 }
 
 function startTraining(opts = {}) {
-    clearInterval(timerInterval); isExamSimulator = false; isBlitzMode = false; sessionResults = {}; sessionStartTime = Date.now(); currentStreak = 0; maxSessionStreak = 0; updateStreakUI();
+    clearInterval(timerInterval); activeVsOpponent = null; is1v1CreatorMode = false;
+    isExamSimulator = false; isBlitzMode = false; sessionResults = {}; sessionStartTime = Date.now(); currentStreak = 0; maxSessionStreak = 0; updateStreakUI();
     if (opts.category === 'practice') { document.getElementById('no-practice-subject').innerText = opts.subject ? `قسم التدريبات العملية • ${opts.subject}` : 'قسم التدريبات العملية • MED26'; switchView('no-practice'); return; }
     activeTimerSeconds = opts.timer || 0;
     if (opts.source === 'mistakes') {
@@ -1272,23 +1562,25 @@ function startTraining(opts = {}) {
     if (!currentList.length) { alert(opts.source === 'bookmarks' ? 'قائمة المفضلة فارغة حالياً!' : opts.source === 'mistakes' ? '🎉 قسم «مراجعة أخطائي» فارغ حالياً — أحسنت!' : 'لا توجد محطات مطابقة حالياً.'); return; }
     currentIndex = 0;
     document.getElementById('trainer-title').innerText = opts.subject ? `${opts.subject} (${opts.lab || 'بالكامل'})` : opts.source === 'mistakes' ? '🎯 مراجعة أخطائي (التثبيت المزدوج 2×)' : opts.source === 'bookmarks' ? '⭐ المفضلة' : opts.highYield ? '🔥 الأكثر تكراراً' : 'التدريب الشامل';
-    switchView('trainer'); playExamStartSound(); renderQuestion();
+    switchView('trainer'); updateVsLiveBanner(); playExamStartSound(); renderQuestion();
 }
 
-function startExamSimulator(customList = null, customTitle = null) {
+function startExamSimulator(customList = null, customTitle = null, vsOpts = null) {
+    activeVsOpponent = vsOpts?.opponent || null;
+    is1v1CreatorMode = !!vsOpts?.creatorMode;
     currentList = customList || [...questionsDB].sort(() => Math.random() - 0.5).slice(0, 18);
     currentIndex = 0; activeTimerSeconds = 90; isExamSimulator = true; isBlitzMode = false; sessionResults = {}; sessionStartTime = Date.now(); currentStreak = 0; maxSessionStreak = 0; updateStreakUI();
     document.getElementById('trainer-title').innerText = customTitle || '⏱️ محاكي الـ OSPE الفعلي (18 محطة • من 20 درجة)';
-    switchView('trainer'); playExamStartSound();
+    switchView('trainer'); updateVsLiveBanner(); playExamStartSound();
     document.getElementById('exam-timer-box').classList.remove('hidden'); document.getElementById('exam-timer-box').classList.add('flex');
     renderQuestion(); resetStationTimer();
 }
 function startBlitzMode() {
-    clearInterval(timerInterval);
+    clearInterval(timerInterval); activeVsOpponent = null; is1v1CreatorMode = false;
     currentList = questionsDB.filter(q => q.type === 'mcq').sort(() => Math.random() - 0.5).slice(0, 25);
     currentIndex = 0; isBlitzMode = true; isExamSimulator = true; activeTimerSeconds = 60; timeLeft = 60; currentStreak = 0; maxSessionStreak = 0; sessionResults = {}; sessionStartTime = Date.now(); updateStreakUI();
     document.getElementById('trainer-title').innerText = '⚡ تحدي الـ Blitz السريع (25 سؤال في 60 ثانية)';
-    switchView('trainer'); playExamStartSound();
+    switchView('trainer'); updateVsLiveBanner(); playExamStartSound();
     document.getElementById('exam-timer-box').classList.remove('hidden'); document.getElementById('exam-timer-box').classList.add('flex');
     renderQuestion(); updateTimerDisplay();
     timerInterval = setInterval(() => { timeLeft--; updateTimerDisplay(); if (timeLeft <= 0) { clearInterval(timerInterval); playOspeBell(); showWeaknessReport(); } }, 1000);
@@ -1314,6 +1606,13 @@ function updateTimerDisplay() {
 }
 
 // ================= 8. عرض السؤال والتصحيح وخريطة المحطات =================
+function updateTopProgressBar() {
+    const bar = document.getElementById('trainer-top-progress-bar');
+    if (!bar || !currentList.length) return;
+    const pct = Math.min(100, Math.round(((currentIndex + 1) / currentList.length) * 100));
+    bar.style.width = `${pct}%`;
+}
+
 function renderStationNavigator() {
     const bar = document.getElementById('station-navigator-bar');
     if (!bar || !Array.isArray(currentList)) return;
@@ -1321,7 +1620,6 @@ function renderStationNavigator() {
         const r = sessionResults[q.id];
         return `<button type="button" onclick="jumpToStation(${idx})" class="st-nav-box ${r ? (r.correct ? 'nav-correct' : 'nav-wrong') : ''} ${idx === currentIndex ? 'nav-current' : ''}">${idx + 1}</button>`;
     }).join('');
-    // تمرير أفقي داخل شريط الخريطة فقط بدون تحريك الصفحة عمودياً إطلاقاً
     const currBtn = bar.querySelector('.nav-current');
     if (currBtn) {
         bar.scrollLeft = Math.max(0, currBtn.offsetLeft - (bar.clientWidth / 2) + (currBtn.offsetWidth / 2));
@@ -1342,6 +1640,14 @@ function toggleZenFocusMode(force) {
 function renderQuestion() {
     const q = currentList[currentIndex]; if (!q) return;
     showingFullSlide = false; currentStationAnswered = false; currentRotation = 0;
+
+    const bodyGrid = document.getElementById('station-body-grid');
+    if (bodyGrid) {
+        bodyGrid.classList.remove('station-swap-anim');
+        void bodyGrid.offsetWidth;
+        bodyGrid.classList.add('station-swap-anim');
+    }
+
     const img = document.getElementById('q-image'); if (img) img.style.transform = 'rotate(0deg)';
     const lens = document.getElementById('magnifier-lens'); if (lens) lens.style.display = 'none';
     document.getElementById('user-typed-answer').value = '';
@@ -1381,10 +1687,26 @@ function renderQuestion() {
         typBox.classList.add('hidden');
         if (revBtn) revBtn.classList.add('hidden');
         mcqBox.classList.remove('hidden'); mcqBox.innerHTML = '';
+        const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
         (q.options || []).forEach((opt, i) => {
             const b = document.createElement('button');
-            b.className = 'w-full text-left p-3.5 sm:p-4 rounded-xl pill-btn font-bold text-sm sm:text-base md:text-lg block';
-            b.innerText = opt; b.onclick = () => checkMcq(i, q.correct);
+            b.className = 'mcq-option-btn p-3 sm:p-3.5 rounded-xl pill-btn font-bold text-sm sm:text-base md:text-lg';
+            const badge = document.createElement('span');
+            badge.className = 'mcq-letter-badge';
+            badge.textContent = letters[i] || String(i + 1);
+
+            const txtSpan = document.createElement('span');
+            txtSpan.className = 'mcq-opt-text';
+            const rawOpt = String(opt || '').trim();
+            txtSpan.textContent = rawOpt.replace(/^[A-Fa-f][\.\)\-\:]\s+/, '') || rawOpt;
+
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'mcq-status-icon';
+
+            b.appendChild(badge);
+            b.appendChild(txtSpan);
+            b.appendChild(iconSpan);
+            b.onclick = () => checkMcq(i, q.correct);
             mcqBox.appendChild(b);
         });
     } else {
@@ -1395,6 +1717,7 @@ function renderQuestion() {
 
     document.getElementById('flashcard-srs-controls')?.classList.toggle('hidden', q.type === 'mcq');
     updateStationMistakeBadge(q.id);
+    updateTopProgressBar();
     saveLastSessionState(); rotateGlobalAdhkar(); renderStationNavigator();
 }
 
@@ -1402,9 +1725,16 @@ function checkMcq(selected, correct) {
     currentStationAnswered = true;
     const btns = document.getElementById('mcq-container').children;
     for (let i = 0; i < btns.length; i++) {
-        btns[i].disabled = true;
-        if (i === correct) btns[i].className = 'w-full text-left p-3.5 sm:p-4 rounded-xl bg-emerald-600 text-white font-extrabold text-sm sm:text-base md:text-lg block';
-        else if (i === selected) btns[i].className = 'w-full text-left p-3.5 sm:p-4 rounded-xl bg-red-600 text-white font-extrabold text-sm sm:text-base md:text-lg block';
+        const btn = btns[i];
+        btn.disabled = true;
+        const iconEl = btn.querySelector('.mcq-status-icon');
+        if (i === correct) {
+            btn.classList.add('mcq-opt-correct');
+            if (iconEl) iconEl.textContent = '✓';
+        } else if (i === selected) {
+            btn.classList.add('mcq-opt-wrong');
+            if (iconEl) iconEl.textContent = '✕';
+        }
     }
     revealAnswer();
     if (selected === correct) incrementTotalSolvedCount();
@@ -1414,7 +1744,12 @@ function checkMcq(selected, correct) {
 
 function revealAnswer() {
     document.getElementById('reveal-btn')?.classList.add('hidden');
-    document.getElementById('answer-box')?.classList.remove('hidden');
+    const ansBox = document.getElementById('answer-box');
+    if (ansBox) {
+        ansBox.classList.remove('hidden', 'answer-reveal-anim');
+        void ansBox.offsetWidth;
+        ansBox.classList.add('answer-reveal-anim');
+    }
     document.getElementById('q-meta-badges')?.classList.remove('hidden');
     document.getElementById('q-sim-hidden-badge')?.classList.add('hidden');
 }
@@ -1515,8 +1850,10 @@ function savePersonalNote() {
 }
 function updateBookmarkBtnUI(id) {
     const fav = bookmarkIds.includes(id);
-    document.getElementById('bookmark-icon').innerText = fav ? '⭐' : '☆';
-    document.getElementById('bookmark-btn').classList.toggle('active', fav);
+    const bi = document.getElementById('bookmark-icon'); if (bi) bi.innerText = fav ? '⭐' : '☆';
+    document.getElementById('bookmark-btn')?.classList.toggle('active', fav);
+    const mbi = document.getElementById('mob-sticky-fav-icon'); if (mbi) mbi.innerText = fav ? '⭐' : '☆';
+    document.getElementById('mob-sticky-fav-btn')?.classList.toggle('active', fav);
 }
 function toggleBookmarkCurrent() {
     const id = currentList[currentIndex]?.id; if (!id) return;
@@ -1534,21 +1871,156 @@ function copyStationLink() {
 function nextQuestion() { if (currentIndex < currentList.length - 1) { currentIndex++; renderQuestion(); if (activeTimerSeconds > 0 && !isBlitzMode) resetStationTimer(); } else { clearInterval(timerInterval); showWeaknessReport(); } }
 function prevQuestion() { if (currentIndex > 0) { currentIndex--; renderQuestion(); if (activeTimerSeconds > 0 && !isBlitzMode) resetStationTimer(); } }
 function toggleFullSlide() { showingFullSlide = !showingFullSlide; const q = currentList[currentIndex]; setSlideSource(document.getElementById('q-image'), q.page, q.slot || 0, showingFullSlide); }
-function openZoomModal(src) { document.getElementById('zoom-img').src = src; const m = document.getElementById('zoom-modal'); m.classList.remove('hidden'); m.classList.add('flex'); }
-function closeZoomModal() { document.getElementById('zoom-modal').classList.add('hidden'); }
+function openZoomModal(src) {
+    if (!src) return;
+    document.getElementById('zoom-img').src = src;
+    resetZoomTransform();
+    const m = document.getElementById('zoom-modal');
+    if (m) { m.classList.remove('hidden'); m.classList.add('flex'); }
+}
+function closeZoomModal() {
+    const m = document.getElementById('zoom-modal');
+    if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+}
+// ================= 9. التقرير والطباعة ونظام المواجهة 1v1 (0 بايت على Firebase) =================
+function finishOrExitSession() {
+    clearInterval(timerInterval);
+    Object.keys(sessionResults).length ? showWeaknessReport() : switchView('home');
+}
 
-// ================= 9. التقرير والطباعة والتحديات =================
-function finishOrExitSession() { clearInterval(timerInterval); Object.keys(sessionResults).length ? showWeaknessReport() : switchView('home'); }
+function build1v1ChallengeUrl(includeMyResult = false) {
+    const list = currentList.length ? currentList : [...questionsDB].sort(() => Math.random() - 0.5).slice(0, 18);
+    const ids = list.map(q => q.id).join(',');
+    let url = `${window.location.origin}${window.location.pathname}?challenge=${ids}`;
+    if (includeMyResult && lastFinishedSessionSummary) {
+        const payload = encodeVsPayload({
+            n: localStorage.getItem('med26_username') || 'طالب MED26',
+            s: lastFinishedSessionSummary.ok,
+            t: lastFinishedSessionSummary.total,
+            sec: lastFinishedSessionSummary.sec,
+            st: lastFinishedSessionSummary.streak
+        });
+        if (payload) url += `&vs=${payload}`;
+    }
+    return { url, count: list.length };
+}
+
+function copyVsTelegramMessage() {
+    if (!lastFinishedSessionSummary) { shareCurrentChallengeLink(true); return; }
+    const { url } = build1v1ChallengeUrl(true);
+    const myName = localStorage.getItem('med26_username') || 'طالب MED26';
+    const { ok, total, sec } = lastFinishedSessionSummary;
+    const msg = activeVsOpponent
+        ? `⚔️ تحدي 1v1 في منصة MED26!\nنتيجتي: ${ok}/${total} في وقت ${formatSecMMSS(sec)} ضد ${activeVsOpponent.n} (${activeVsOpponent.s}/${activeVsOpponent.t || total})\nتقدر تكسر رقمي على نفس الأسئلة؟ 👇\n${url}`
+        : `⚔️ اتحداك 1v1 على نفس المحطات في منصة MED26!\nأنا (${myName}) جبت ${ok}/${total} في وقت ${formatSecMMSS(sec)} ⏱️\nادخل وجرب تهزمني 👇\n${url}`;
+    navigator.clipboard.writeText(msg)
+        .then(() => alert('📋 تم نسخ رسالة التحدي + الرابط! الصقها مباشرة في التلقرام أو الواتساب 🔥'))
+        .catch(() => prompt('انسخ الرسالة والرابط:', msg));
+}
+
+function rematchVsChallenge() {
+    if (!currentList.length) return;
+    startExamSimulator(
+        [...currentList],
+        activeVsOpponent ? `⚔️ إعادة المواجهة 1v1 ضد ${activeVsOpponent.n}` : `⚔️ إعادة تحدي 1v1 (${currentList.length} محطة)`,
+        { opponent: activeVsOpponent, creatorMode: !activeVsOpponent }
+    );
+}
+
+function renderVsArenaResult(summary) {
+    const card = document.getElementById('vs-arena-card');
+    if (!card) return;
+    const myName = localStorage.getItem('med26_username') || 'أنت';
+
+    if (activeVsOpponent) {
+        const opp = activeVsOpponent;
+        const oppTotal = opp.t || summary.total;
+        const myWon = (summary.ok > opp.s) || (summary.ok === opp.s && summary.sec < opp.sec);
+        const isTie = (summary.ok === opp.s && summary.sec === opp.sec);
+        const timeDiff = Math.abs(summary.sec - opp.sec);
+
+        let verdictTitle = '';
+        let verdictSub = '';
+        let borderCls = 'border-emerald-400/70';
+
+        if (myWon) {
+            verdictTitle = `🏆 كفو يا بطل! هزمت ${opp.n} في مواجهة 1v1!`;
+            verdictSub = summary.ok > opp.s
+                ? `تفوّقت عليه بفارق ${summary.ok - opp.s} محطات صحيحة (${summary.ok}/${summary.total} مقابل ${opp.s}/${oppTotal}) 🔥`
+                : `تعادلتما في الدرجة (${summary.ok}/${summary.total}) لكنك حسمتها بسرعة بفارق ${timeDiff} ثانية ⚡`;
+            borderCls = 'border-emerald-400/80';
+        } else if (isTie) {
+            verdictTitle = `🤝 تعادل تاريخي مع ${opp.n}!`;
+            verdictSub = `نفس الدرجة (${summary.ok}/${summary.total}) ونفس الوقت بالثانية (${formatSecMMSS(summary.sec)})!`;
+            borderCls = 'border-amber-400/80';
+        } else {
+            verdictTitle = `🔥 تفوّق عليك ${opp.n} هذه المرة!`;
+            verdictSub = opp.s > summary.ok
+                ? `تقدّم عليك بفارق ${opp.s - summary.ok} محطات (${opp.s}/${oppTotal} مقابل ${summary.ok}/${summary.total}) — جرب تردّها الآن!`
+                : `تعادلتما في الدرجة (${summary.ok}/${summary.total}) لكنه كان أسرع منك بفارق ${timeDiff} ثانية!`;
+            borderCls = 'border-rose-400/70';
+        }
+
+        card.className = `rounded-3xl p-5 sm:p-6 border-2 ${borderCls} bg-gradient-to-br from-slate-900/95 via-slate-950/95 to-emerald-950/35 space-y-4 shadow-2xl text-white`;
+        card.innerHTML = `
+            <div class="text-center space-y-1">
+                <span class="inline-block px-3 py-0.5 rounded-full text-[11px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">⚔️ نتيجة المواجهة المباشرة (1v1 VS MODE)</span>
+                <h3 class="text-lg sm:text-2xl font-black text-amber-300 pt-1">${verdictTitle}</h3>
+                <p class="text-xs sm:text-sm text-slate-300 font-bold">${verdictSub}</p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-11 gap-3 items-center">
+                <div class="sm:col-span-5 rounded-2xl p-4 border ${myWon ? 'border-emerald-400 bg-emerald-950/40' : 'border-slate-700 bg-black/35'} text-center space-y-1.5">
+                    <div class="text-xs font-black text-amber-300">${myWon ? '👑 ' : ''}${myName} (أنت)</div>
+                    <div class="text-2xl sm:text-3xl font-black text-white" dir="ltr">${summary.ok} / ${summary.total}</div>
+                    <div class="text-xs text-slate-300 font-bold" dir="ltr">⏱️ ${formatSecMMSS(summary.sec)} • 🔥 ${summary.streak}</div>
+                </div>
+                <div class="sm:col-span-1 text-center text-xl font-black text-amber-400">VS</div>
+                <div class="sm:col-span-5 rounded-2xl p-4 border ${!myWon && !isTie ? 'border-rose-400 bg-rose-950/35' : 'border-slate-700 bg-black/35'} text-center space-y-1.5">
+                    <div class="text-xs font-black text-sky-300">${!myWon && !isTie ? '👑 ' : ''}${opp.n} (المتحدّي)</div>
+                    <div class="text-2xl sm:text-3xl font-black text-white" dir="ltr">${opp.s} / ${oppTotal}</div>
+                    <div class="text-xs text-slate-300 font-bold" dir="ltr">⏱️ ${formatSecMMSS(opp.sec)}${typeof opp.st === 'number' ? ` • 🔥 ${opp.st}` : ''}</div>
+                </div>
+            </div>
+            <div class="flex flex-wrap justify-center gap-2 pt-1">
+                <button onclick="copyVsTelegramMessage()" class="gold-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black shadow">📤 نسخ رسالة ردّ التحدي 1v1</button>
+                <button onclick="rematchVsChallenge()" class="pill-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold text-amber-300">🔄 إعادة نفس المواجهة</button>
+            </div>`;
+        card.classList.remove('hidden');
+        return;
+    }
+
+    if (is1v1CreatorMode) {
+        card.className = 'rounded-3xl p-5 sm:p-6 border-2 border-emerald-400/70 bg-gradient-to-br from-slate-900/95 via-slate-950/95 to-emerald-950/40 space-y-3 shadow-2xl text-center text-white';
+        card.innerHTML = `
+            <span class="inline-block px-3 py-0.5 rounded-full text-[11px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">⚔️ رابط تحدي 1v1 جاهز للإرسال!</span>
+            <h3 class="text-base sm:text-xl font-black text-amber-300">سجّلت ${summary.ok}/${summary.total} في ${formatSecMMSS(summary.sec)} — أرسل التحدي لصاحبك الآن!</h3>
+            <p class="text-xs text-slate-300 font-bold">عندما يفتح زميلك الرابط سيحل نفس المحطات وتظهر له شاشة مقارنة (VS) مباشرة ضد نتيجتك ووقتك.</p>
+            <div class="flex flex-wrap justify-center gap-2 pt-1">
+                <button onclick="copyVsTelegramMessage()" class="gold-btn px-5 py-2.5 rounded-xl text-xs sm:text-sm font-black shadow-lg">📋 نسخ رسالة ورابط التحدي للتلقرام</button>
+                <button onclick="shareCurrentChallengeLink(true)" class="pill-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold text-emerald-300">🔗 نسخ الرابط فقط</button>
+            </div>`;
+        card.classList.remove('hidden');
+        return;
+    }
+
+    card.classList.add('hidden');
+}
+
 function recordScoreboardStats() {
     const entries = Object.values(sessionResults), ok = entries.filter(e => e.correct).length;
     const sec = Math.max(5, Math.floor((Date.now() - sessionStartTime) / 1000));
     if (maxSessionStreak > parseInt(localStorage.getItem('med26_best_streak') || '0', 10)) localStorage.setItem('med26_best_streak', String(maxSessionStreak));
     if (isExamSimulator && !isBlitzMode && ok >= 12 && sec < parseInt(localStorage.getItem('med26_best_sim_time') || '9999', 10)) localStorage.setItem('med26_best_sim_time', String(sec));
-    if ((window.location.search.includes('challenge=') || (document.getElementById('trainer-title')?.innerText || '').includes('تحدي')) && ok >= Math.ceil(currentList.length * 0.6)) {
+
+    const won1v1 = activeVsOpponent
+        ? (ok > activeVsOpponent.s || (ok === activeVsOpponent.s && sec < activeVsOpponent.sec))
+        : ((window.location.search.includes('challenge=') || (document.getElementById('trainer-title')?.innerText || '').includes('تحدي')) && ok >= Math.ceil(currentList.length * 0.6));
+    if (won1v1) {
         localStorage.setItem('med26_challenge_wins', String(parseInt(localStorage.getItem('med26_challenge_wins') || '0', 10) + 1));
     }
     if (typeof window.syncLiveScoreboard === 'function') window.syncLiveScoreboard(true);
 }
+
 function showWeaknessReport() {
     clearInterval(timerInterval); toggleZenFocusMode(false);
     const entries = Object.values(sessionResults); if (!entries.length) { switchView('home'); return; }
@@ -1556,12 +2028,16 @@ function showWeaknessReport() {
     const total = isExamSimulator ? currentList.length : entries.length, ok = entries.filter(e => e.correct).length;
     const pct = Math.round((ok / Math.max(1, total)) * 100), sc20 = Math.round(((ok / Math.max(1, total)) * 20) * 10) / 10;
     const sec = Math.max(1, Math.floor((Date.now() - sessionStartTime) / 1000));
-    document.getElementById('scorecard-mode-label').innerText = isBlitzMode ? '⚡ تحدي 60 ثانية' : (isExamSimulator ? `⏱️ المحاكي (${total} محطة)` : `📊 تقرير (${total} محطة)`);
+
+    lastFinishedSessionSummary = { ok, total, sec, streak: maxSessionStreak };
+    renderVsArenaResult(lastFinishedSessionSummary);
+
+    document.getElementById('scorecard-mode-label').innerText = isBlitzMode ? '⚡ تحدي 60 ثانية' : (activeVsOpponent ? `⚔️ 1v1 ضد ${activeVsOpponent.n}` : is1v1CreatorMode ? `⚔️ تحدي 1v1 (${total} محطة)` : isExamSimulator ? `⏱️ المحاكي (${total} محطة)` : `📊 تقرير (${total} محطة)`);
     document.getElementById('report-score-20').innerText = `${sc20} / 20`;
     document.getElementById('report-score-badge').innerText = `نسبة الإتقان: ${pct}% (${ok} من ${total})`;
     document.getElementById('sc-correct').innerText = `${ok}/${total}`;
     document.getElementById('sc-streak').innerText = `🔥 ${maxSessionStreak}`;
-    document.getElementById('sc-time').innerText = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+    document.getElementById('sc-time').innerText = formatSecMMSS(sec);
 
     const labs = {};
     entries.forEach(e => { const k = `${e.q.subject} • ${e.q.lab}`; if (!labs[k]) labs[k] = { t: 0, c: 0, s: e.q.subject, l: e.q.lab }; labs[k].t++; if (e.correct) labs[k].c++; });
@@ -1575,12 +2051,15 @@ function showWeaknessReport() {
     document.getElementById('report-retry-mistakes-btn').classList.toggle('hidden', !entries.some(e => !e.correct));
     switchView('report');
 }
+
 function retrySessionMistakes() {
     const m = Object.values(sessionResults).filter(e => !e.correct).map(e => e.q); if (!m.length) return;
+    activeVsOpponent = null; is1v1CreatorMode = false;
     currentList = m; currentIndex = 0; activeTimerSeconds = 0; isExamSimulator = false; isBlitzMode = false; sessionResults = {}; sessionStartTime = Date.now();
     document.getElementById('trainer-title').innerText = `🔄 مراجعة أخطاء الجلسة (${m.length})`;
-    switchView('trainer'); playExamStartSound(); renderQuestion();
+    switchView('trainer'); updateVsLiveBanner(); playExamStartSound(); renderQuestion();
 }
+
 function downloadScoreCardImage() {
     const c = document.createElement('canvas'); c.width = 1080; c.height = 680; const ctx = c.getContext('2d');
     const g = ctx.createLinearGradient(0, 0, 1080, 680); g.addColorStop(0, '#1e1b17'); g.addColorStop(1, '#29221a');
@@ -1595,14 +2074,24 @@ function downloadScoreCardImage() {
     ctx.fillStyle = '#c4baa8'; ctx.font = 'bold 22px Arial'; ctx.fillText('MED26 JAZAN UNIVERSITY • Done by Lester Crest', 540, 595);
     const a = document.createElement('a'); a.download = 'MED26_ScoreCard.png'; a.href = c.toDataURL('image/png'); a.click();
 }
-function shareCurrentChallengeLink() {
-    const list = currentList.length ? currentList : [...questionsDB].sort(() => Math.random() - 0.5).slice(0, 18);
-    navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?challenge=${list.map(q => q.id).join(',')}`).then(() => alert(`⚔️ تم نسخ رابط التحدي (${list.length} محطة)!`));
+
+function shareCurrentChallengeLink(includeMyScore = false) {
+    const withScore = includeMyScore || !document.getElementById('view-report')?.classList.contains('hidden');
+    const { url, count } = build1v1ChallengeUrl(withScore);
+    const msg = withScore && lastFinishedSessionSummary
+        ? `⚔️ تم نسخ رابط تحدي 1v1 (${count} محطة) متضمّناً اسمك ودرجتك (${lastFinishedSessionSummary.ok}/${lastFinishedSessionSummary.total}) ووقتك (${formatSecMMSS(lastFinishedSessionSummary.sec)})!\nأرسله لصاحبك الآن لمقارنة النتائج وجهاً لوجه 🔥`
+        : `⚔️ تم نسخ رابط تحدي 1v1 (${count} محطة)! (ولمقارنة الدرجة والوقت تلقائياً، أنهِ الجلسة وانسخ الرابط من شاشة النتيجة).`;
+    navigator.clipboard.writeText(url)
+        .then(() => alert(msg))
+        .catch(() => prompt('انسخ رابط تحدي 1v1:', url));
 }
+
 function createDirectFriendChallenge() {
-    const r18 = [...questionsDB].sort(() => Math.random() - 0.5).slice(0, 18);
-    navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?challenge=${r18.map(q => q.id).join(',')}`).then(() => { alert('⚔️ تم نسخ رابط التحدي (18 محطة)! أرسله لصاحبك الآن.'); startExamSimulator(r18, '⚔️ تحدي الأصدقاء (18 محطة)'); });
+    const pool = [...questionsDB].sort(() => Math.random() - 0.5).slice(0, Math.min(10, questionsDB.length));
+    if (!pool.length) { alert('لا توجد أسئلة متاحة حالياً لبدء التحدي.'); return; }
+    startExamSimulator(pool, `⚔️ تحدي صاحبي 1v1 (${pool.length} محطة)`, { opponent: null, creatorMode: true });
 }
+
 function printCustomPDF(mode = 'both') {
     const ids = mode === 'mistakes' ? [...mistakeIds] : mode === 'bookmarks' ? [...bookmarkIds] : Array.from(new Set([...mistakeIds, ...bookmarkIds]));
     const list = questionsDB.filter(q => ids.includes(q.id));
@@ -1620,12 +2109,12 @@ function triggerChecklistCelebration(evt) {
     playToneSequence([587.33, 880, 1174.66], 'triangle', 0.12, 0.07, 0.18);
     const r = evt?.target?.getBoundingClientRect() || { left: window.innerWidth / 2, top: window.innerHeight / 2, width: 10, height: 10 };
     const cols = ['#fbbf24', '#10b981', '#f43f5e', '#8b5cf6', '#38bdf8'];
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < 20; i++) {
         const p = document.createElement('div');
         p.style.cssText = `position:fixed;left:${r.left + r.width/2}px;top:${r.top + r.height/2}px;width:7px;height:7px;background:${cols[i % cols.length]};border-radius:50%;pointer-events:none;z-index:9999;`;
         document.body.appendChild(p);
         const ang = Math.random() * Math.PI * 2, v = 45 + Math.random() * 85;
-        p.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: `translate(${Math.cos(ang)*v}px,${Math.sin(ang)*v+40}px) scale(0.2)`, opacity: 0 }], { duration: 700 }).onfinish = () => p.remove();
+        p.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: `translate(${Math.cos(ang)*v}px,${Math.sin(ang)*v+40}px) scale(0.2)`, opacity: 0 }], { duration: 650 }).onfinish = () => p.remove();
     }
 }
 function saveChecklistItem(labId, field, value, evt) {
@@ -1695,7 +2184,15 @@ function togglePomodoroVisibility() {
     if (w.classList.contains('hidden')) { localStorage.removeItem('med26_hide_pomo'); w.classList.remove('hidden'); } else hidePomodoroWidget();
 }
 
-// ================= 11. لوحة المتصدرين + المناضل AI + نبض الدفعة =================
+// ================= 11. لوحة المتصدرين (مع هياكل تحميل نابضة) + المناضل AI + نبض الدفعة =================
+function renderScoreboardSkeleton(con) {
+    con.innerHTML = Array.from({ length: 4 }).map(() => `
+        <div class="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-2xl p-4 space-y-3">
+            <div class="med26-skel h-5 w-48"></div>
+            <div class="space-y-2">${Array.from({ length: 4 }).map(() => `<div class="med26-skel h-10 w-full"></div>`).join('')}</div>
+        </div>`).join('');
+}
+
 function buildScoreboardHTML() {
     const user = localStorage.getItem('med26_username') || 'طالب MED26', sbU = document.getElementById('sb-current-user'), con = document.getElementById('scoreboard-four-lists');
     if (sbU) sbU.innerText = user; if (!con) return;
@@ -1719,10 +2216,17 @@ function buildScoreboardHTML() {
     }).join('');
 }
 async function renderScoreboardLists() {
-    buildScoreboardHTML();
-    if (!isFetchingScores && (Date.now() - lastScoreboardFetchTime > 15000 || !globalLivePlayers.length)) {
+    const con = document.getElementById('scoreboard-four-lists');
+    const needFetch = !isFetchingScores && (Date.now() - lastScoreboardFetchTime > 15000 || !globalLivePlayers.length);
+    if (con && !globalLivePlayers.length && needFetch) {
+        renderScoreboardSkeleton(con);
+    } else {
+        buildScoreboardHTML();
+    }
+    if (needFetch) {
         isFetchingScores = true; lastScoreboardFetchTime = Date.now();
-        try { if (typeof window.syncLiveScoreboard === 'function') await window.syncLiveScoreboard(false); buildScoreboardHTML(); } catch (e) {}
+        try { if (typeof window.syncLiveScoreboard === 'function') await window.syncLiveScoreboard(false); } catch (e) {}
+        buildScoreboardHTML();
         isFetchingScores = false;
     }
 }
@@ -1771,7 +2275,11 @@ async function pollLiveCohortActivity() {
 setInterval(pollLiveCohortActivity, 90000); setTimeout(pollLiveCohortActivity, 4500);
 
 window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && document.body.classList.contains('med26-zen-mode')) { toggleZenFocusMode(false); return; }
+    if (e.key === 'Escape') {
+        const zm = document.getElementById('zoom-modal');
+        if (zm && !zm.classList.contains('hidden')) { closeZoomModal(); return; }
+        if (document.body.classList.contains('med26-zen-mode')) { toggleZenFocusMode(false); return; }
+    }
     if (document.getElementById('view-trainer')?.classList.contains('hidden')) return;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
     if (e.code === 'ArrowLeft') { e.preventDefault(); nextQuestion(); }
