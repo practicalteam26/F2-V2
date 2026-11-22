@@ -1,4 +1,4 @@
-/* ================= MED26 Unified Core Styles (Clean & Fast) ================= */
+/* ================= MED26 Unified Core Styles (Clean, Fast & Interactive) ================= */
 :root {
     --bg-main: #141210;
     --bg-secondary: #1e1b17;
@@ -11,16 +11,30 @@
     --watermark-opacity: 0.05;
 }
 
+/* الوضع الفاتح المحسّن بتباين عالٍ للقاعات والآيباد */
 body.light-mode {
-    --bg-main: #f6f3ec;
-    --bg-secondary: #ebe5d8;
+    --bg-main: #f5f1e8;
+    --bg-secondary: #e9e2d3;
     --bg-card: #ffffff;
-    --text-main: #1f1c18;
-    --text-muted: #5c5346;
-    --gold-bright: #8c6528;
-    --gold-primary: #a67c38;
-    --border-color: rgba(166, 124, 56, 0.35);
+    --text-main: #1b1815;
+    --text-muted: #52493d;
+    --gold-bright: #7d571d;
+    --gold-primary: #9c702c;
+    --border-color: rgba(140, 101, 40, 0.36);
     --watermark-opacity: 0.04;
+}
+
+/* الوضع الأسود العميق للّيل (AMOLED Dark Mode) */
+body.amoled-mode {
+    --bg-main: #000000;
+    --bg-secondary: #0a0a0b;
+    --bg-card: #111113;
+    --text-main: #f5f5f5;
+    --text-muted: #a3a3a3;
+    --gold-bright: #ebd2a4;
+    --gold-primary: #cfa96b;
+    --border-color: rgba(207, 169, 107, 0.28);
+    --watermark-opacity: 0.035;
 }
 
 html, body {
@@ -35,7 +49,7 @@ body {
     font-family: 'Cairo', sans-serif;
     background-color: var(--bg-main);
     color: var(--text-main);
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 header, main, footer, section, .app-card {
@@ -59,6 +73,37 @@ html.session-agreed body.modal-open {
     height: auto !important;
     touch-action: auto !important;
 }
+
+/* تحسين تباين النصوص والشارات في الوضع الفاتح */
+body.light-mode .text-amber-300,
+body.light-mode .text-amber-200,
+body.light-mode .text-amber-400 { color: #92400e !important; }
+body.light-mode .text-emerald-300,
+body.light-mode .text-emerald-400 { color: #065f46 !important; }
+body.light-mode .text-rose-300,
+body.light-mode .text-rose-200 { color: #9f1239 !important; }
+body.light-mode .text-red-300,
+body.light-mode .text-red-400 { color: #b91c1c !important; }
+body.light-mode .text-orange-300 { color: #9a3412 !important; }
+body.light-mode .text-sky-300 { color: #0369a1 !important; }
+body.light-mode .gamemode-card h4,
+body.light-mode #sb-current-user,
+body.light-mode #cd-hours,
+body.light-mode #cd-mins { color: #1b1815 !important; }
+body.light-mode #answer-box { background-color: rgba(16, 185, 129, 0.1) !important; }
+body.light-mode #team-note-box { background-color: rgba(217, 119, 6, 0.12) !important; color: #78350f !important; }
+/* إبقاء النصوص البيضاء واضحة داخل البطاقات والنوافذ الداكنة الثابتة */
+body.light-mode #luxury-score-card .text-amber-400 { color: #fbbf24 !important; }
+body.light-mode #luxury-score-card .text-emerald-400 { color: #34d399 !important; }
+body.light-mode #luxury-score-card .text-sky-300 { color: #7dd3fc !important; }
+body.light-mode #f2-checklist-modal .text-amber-400,
+body.light-mode #f2-checklist-modal .text-amber-300,
+body.light-mode #med26-pomo-widget .text-amber-300,
+body.light-mode #med26-pomo-widget .text-amber-400 { color: #fcd34d !important; }
+body.light-mode #med26-pomo-widget .text-emerald-300 { color: #6ee7b7 !important; }
+body.light-mode #med26-pomo-widget .text-rose-300,
+body.light-mode #med26-pomo-widget .text-rose-200 { color: #fda4af !important; }
+body.light-mode .footer-marquee-wrap .text-white { color: #1b1815 !important; }
 
 /* الشاشة التحذيرية والخلفية والضباب الثابت */
 #disclaimer-modal {
@@ -85,7 +130,8 @@ html.session-agreed body.modal-open {
 }
 #bg-Stage { z-index: 0; }
 #cinematic-fog-stage { z-index: 1; }
-body.light-mode #cinematic-fog-stage { opacity: 0.35; }
+body.light-mode #cinematic-fog-stage { opacity: 0.3; }
+body.amoled-mode #cinematic-fog-stage { display: none !important; }
 
 .fog-layer { position: absolute; border-radius: 50%; pointer-events: none; }
 .fog-top-spotlight {
@@ -108,9 +154,12 @@ body.light-mode #cinematic-fog-stage { opacity: 0.35; }
     background: radial-gradient(ellipse at 50% 100%, rgba(207, 169, 107, 0.24) 0%, transparent 76%);
     filter: blur(60px);
 }
+@media (max-width: 767px) {
+    .fog-layer { filter: blur(36px); opacity: 0.65; }
+}
 
 /* الهيدر والبطاقات */
-#main-header { transition: transform 0.25s ease, opacity 0.2s ease; }
+#main-header { transition: transform 0.22s ease, opacity 0.18s ease; }
 #main-header.header-hidden { transform: translateY(-110%); opacity: 0; pointer-events: none; }
 
 .app-card {
@@ -121,6 +170,7 @@ body.light-mode #cinematic-fog-stage { opacity: 0.35; }
     position: relative;
     overflow: hidden;
 }
+body.amoled-mode .app-card { box-shadow: none; }
 
 .card-watermark {
     position: absolute;
@@ -137,7 +187,7 @@ body.light-mode #cinematic-fog-stage { opacity: 0.35; }
     background: linear-gradient(135deg, #e5c68e 0%, #b88f4d 100%);
     color: #181512;
     font-weight: 800;
-    transition: background 0.15s ease;
+    transition: background 0.15s ease, transform 0.12s ease;
     cursor: pointer;
 }
 .gold-btn:hover, .gold-btn:active {
@@ -148,12 +198,12 @@ body.light-mode #cinematic-fog-stage { opacity: 0.35; }
     background-color: var(--bg-secondary);
     border: 1.5px solid var(--border-color);
     color: var(--text-main);
-    transition: background-color 0.15s ease, border-color 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
     cursor: pointer;
 }
 .pill-btn:hover, .pill-btn.active {
     background: linear-gradient(135deg, #e5c68e 0%, #b88f4d 100%);
-    color: #181512;
+    color: #181512 !important;
     border-color: transparent;
     font-weight: 800;
 }
@@ -181,19 +231,37 @@ body.light-mode #cinematic-fog-stage { opacity: 0.35; }
     line-height: 1.4;
     margin: 1px;
 }
+body.light-mode .warn-highlight { color: #b91c1c; }
 
-/* بطاقات الأطوار والمواد واللابات */
+/* بطاقات الأطوار والمواد + التوهّج الناعم عند التمرير (Hover Glow & Depth) */
 .gamemode-card {
     background: linear-gradient(145deg, rgba(44, 40, 35, 0.96) 0%, rgba(26, 23, 20, 0.98) 100%);
     border: 1.5px solid rgba(207, 169, 107, 0.36);
     position: relative;
     overflow: hidden;
-    transition: border-color 0.15s ease;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 body.light-mode .gamemode-card {
     background: linear-gradient(145deg, #ffffff 0%, #f3ede2 100%);
 }
-.gamemode-card:hover { border-color: var(--gold-bright); }
+body.amoled-mode .gamemode-card {
+    background: linear-gradient(145deg, #141416 0%, #09090b 100%);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .gamemode-card:hover {
+        transform: translateY(-3px);
+        border-color: var(--gold-bright);
+        box-shadow: 0 12px 26px -10px rgba(207, 169, 107, 0.34), 0 0 0 1px rgba(235, 210, 164, 0.22);
+    }
+    #view-home > .grid.grid-cols-1.md\:grid-cols-2 > div {
+        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+    #view-home > .grid.grid-cols-1.md\:grid-cols-2 > div:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 14px 30px -10px var(--card-glow, rgba(207, 169, 107, 0.36));
+    }
+}
 
 .sub-micro { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.45); }
 .sub-patho { background: rgba(244, 63, 94, 0.18); color: #fda4af; border: 1px solid rgba(244, 63, 94, 0.45); }
@@ -204,7 +272,120 @@ body.light-mode .sub-patho { color: #9f1239; }
 body.light-mode .sub-histo { color: #6b21a8; }
 body.light-mode .sub-surg  { color: #075985; }
 
-/* أدوات العينة والعدسة */
+/* شريط التقدّم النحيف المثبّت أعلى شاشة الأسئلة (3px) */
+#trainer-top-progress-wrap {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    z-index: 130;
+    pointer-events: none;
+}
+body.light-mode #trainer-top-progress-wrap { background: rgba(0, 0, 0, 0.08); }
+#trainer-top-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #b88f4d 0%, #ebd2a4 100%);
+    transition: width 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+body[data-track="theory"] #trainer-top-progress-bar {
+    background: linear-gradient(90deg, #be123c 0%, #fb7185 100%);
+}
+
+/* أزرار خيارات MCQ بحروف مميّزة (A / B / C / D Badges) + نبضة الصح */
+.mcq-option-btn {
+    display: flex !important;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    text-align: left;
+    transition: background-color 0.14s ease, border-color 0.14s ease, transform 0.12s ease;
+}
+.mcq-letter-badge {
+    width: 32px; height: 32px; min-width: 32px;
+    border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 900; font-size: 13px;
+    background: rgba(207, 169, 107, 0.14);
+    border: 1.5px solid var(--border-color);
+    color: var(--gold-bright);
+    transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.mcq-option-btn:not(:disabled):hover .mcq-letter-badge {
+    background: rgba(24, 21, 18, 0.18);
+    border-color: rgba(24, 21, 18, 0.35);
+    color: #181512;
+}
+.mcq-opt-text {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.45;
+}
+.mcq-status-icon {
+    font-size: 15px;
+    font-weight: 900;
+    opacity: 0;
+    transform: scale(0.6);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    flex-shrink: 0;
+}
+.mcq-opt-correct {
+    background: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+    border-color: #6ee7b7 !important;
+    color: #ffffff !important;
+    animation: mcqCorrectPulse 0.4s ease-out;
+}
+.mcq-opt-correct .mcq-letter-badge {
+    background: rgba(255, 255, 255, 0.24) !important;
+    border-color: rgba(255, 255, 255, 0.55) !important;
+    color: #ffffff !important;
+}
+.mcq-opt-wrong {
+    background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%) !important;
+    border-color: #fca5a5 !important;
+    color: #ffffff !important;
+}
+.mcq-opt-wrong .mcq-letter-badge {
+    background: rgba(255, 255, 255, 0.22) !important;
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    color: #ffffff !important;
+}
+.mcq-opt-correct .mcq-status-icon,
+.mcq-opt-wrong .mcq-status-icon {
+    opacity: 1;
+    transform: scale(1);
+}
+@keyframes mcqCorrectPulse {
+    0% { transform: scale(1); }
+    45% { transform: scale(1.012); }
+    100% { transform: scale(1); }
+}
+
+/* انتقال ناعم بين الأسئلة (150ms) وكشف سلس لصندوق الإجابة */
+.station-swap-anim { animation: stationSwapIn 0.15s ease-out; }
+@keyframes stationSwapIn {
+    from { opacity: 0.25; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.answer-reveal-anim { animation: answerSmoothExpand 0.18s ease-out; }
+@keyframes answerSmoothExpand {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* هياكل تحميل نابضة خفيفة (Skeleton Loaders) */
+.med26-skel {
+    background: rgba(148, 163, 184, 0.16);
+    border-radius: 10px;
+    animation: skelPulse 1.1s ease-in-out infinite;
+}
+body.light-mode .med26-skel { background: rgba(100, 116, 139, 0.2); }
+@keyframes skelPulse {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 0.9; }
+}
+
+/* أدوات العينة والعدسة وتكبير العينات (Pinch-to-Zoom) */
 #magnifier-lens {
     position: absolute; width: 150px; height: 150px; border-radius: 50%;
     border: 3px solid #ebd2a4;
@@ -214,6 +395,29 @@ body.light-mode .sub-surg  { color: #075985; }
 }
 .enhanced-slide-lvl1 { filter: contrast(1.28) brightness(1.08) saturate(1.22); }
 .enhanced-slide-lvl2 { filter: contrast(1.5) brightness(1.14) saturate(1.35); }
+
+#zoom-stage {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    touch-action: none;
+}
+#zoom-img {
+    transform-origin: center center;
+    transition: transform 0.12s ease-out;
+    user-select: none;
+    -webkit-user-drag: none;
+    touch-action: none;
+    cursor: grab;
+}
+#zoom-img.zoom-dragging {
+    transition: none !important;
+    cursor: grabbing;
+}
 
 /* خريطة المحطات ووضع التركيز Zen Mode */
 #station-navigator-bar { scrollbar-width: thin; scrollbar-color: var(--gold-primary) transparent; }
@@ -262,24 +466,16 @@ body.med26-zen-mode main { max-width: 100% !important; padding-top: 1.25rem !imp
     width: auto !important;
     max-width: min(92vw, 480px) !important;
     margin: 0 !important;
-    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.62) !important;
-    backdrop-filter: blur(12px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55) !important;
 }
-#smart-mistake-toast {
-    bottom: 22px !important;
-}
-#srs-toast,
-#timeout-toast {
-    top: 18px !important;
-}
+#smart-mistake-toast { bottom: 22px !important; }
+#srs-toast, #timeout-toast { top: 18px !important; }
 @media (max-width: 767px) {
-    #smart-mistake-toast {
-        bottom: 62px !important;
-    }
+    #smart-mistake-toast { bottom: 72px !important; }
 }
 
 /* المناضل AI ولوحة المتصدرين ونبض الدفعة */
-#ai-tutor-drawer { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+#ai-tutor-drawer { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
 #ai-tutor-drawer.drawer-closed { transform: translateX(-105%); }
 .ai-msg-bubble { background: rgba(207, 169, 107, 0.14); border: 1px solid rgba(207, 169, 107, 0.4); border-radius: 18px 18px 4px 18px; }
 .user-msg-bubble { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 18px 18px 18px 4px; }
@@ -292,7 +488,7 @@ body.med26-zen-mode main { max-width: 100% !important; padding-top: 1.25rem !imp
 #live-cohort-toast {
     position: fixed; top: 78px; left: 16px; z-index: 95; max-width: 340px;
     transform: translateX(-130%); opacity: 0;
-    transition: transform 0.35s ease, opacity 0.3s ease;
+    transition: transform 0.3s ease, opacity 0.25s ease;
 }
 #live-cohort-toast.toast-visible { transform: translateX(0); opacity: 1; }
 
@@ -307,16 +503,26 @@ body.med26-zen-mode main { max-width: 100% !important; padding-top: 1.25rem !imp
 body.light-mode .footer-marquee-wrap {
     background: linear-gradient(90deg, #ebe5d8 0%, #dfd5c3 50%, #ebe5d8 100%);
 }
-.footer-marquee-track { display: flex; width: max-content; animation: scrollRightToLeft 38s linear infinite; }
+body.amoled-mode .footer-marquee-wrap {
+    background: #080809;
+}
+.footer-marquee-track { display: flex; width: max-content; animation: scrollRightToLeft 62s linear infinite; }
 .footer-marquee-wrap:hover .footer-marquee-track { animation-play-state: paused; }
 @keyframes scrollRightToLeft { 0% { transform: translateX(-50%); } 100% { transform: translateX(0%); } }
+.footer-marquee-track > div > span:not([dir="ltr"]) {
+    direction: rtl;
+    unicode-bidi: isolate;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
 
 /* تحسين الأداء والطباعة */
 #atlas-grid > div { content-visibility: auto; contain-intrinsic-size: 340px; }
-.page-route-enter { animation: routePageFadeIn 0.22s ease forwards; }
-@keyframes routePageFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.page-route-enter { animation: routePageFadeIn 0.2s ease forwards; }
+@keyframes routePageFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes popStreak { 0% { transform: scale(0.88); } 50% { transform: scale(1.06); } 100% { transform: scale(1); } }
-.streak-anim { animation: popStreak 0.3s ease-out; }
+.streak-anim { animation: popStreak 0.28s ease-out; }
 
 #print-pdf-container { display: none; }
 @media print {
@@ -326,10 +532,16 @@ body.light-mode .footer-marquee-wrap {
     .print-station-box { page-break-inside: avoid; border: 2px solid #b88f4d !important; border-radius: 14px; padding: 14px; margin-bottom: 16px; background: #fdfbf7 !important; color: #111 !important; }
 }
 
-/* استجابة الجوال والآيباد (قوائم علوية منظمة بدون شريط سفلي) */
+/* شريط التنقّل السفلي الثابت داخل شاشة الأسئلة على الجوال فقط */
+#mobile-trainer-sticky-bar {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+
+/* استجابة الجوال والآيباد + تصغير الأزرار العائمة لتحرير مساحة القراءة */
 @media (max-width: 1023px) { #top-dhikr-pill { display: none !important; } }
 @media (max-width: 767px) {
-    body { padding-bottom: 72px !important; }
+    body { padding-bottom: 66px !important; }
+    body.in-trainer-view { padding-bottom: 84px !important; }
     #top-user-badge { padding: 4px 8px !important; font-size: 11px !important; }
     #top-user-badge span:last-child { display: none !important; }
     #mobile-top-nav-row {
@@ -337,18 +549,54 @@ body.light-mode .footer-marquee-wrap {
         flex-basis: 100% !important;
         width: 100% !important;
     }
-    #mobile-top-nav {
-        scrollbar-width: none;
-    }
+    #mobile-top-nav { scrollbar-width: none; }
     #mobile-top-nav::-webkit-scrollbar { display: none; }
-    #med26-pomo-widget { bottom: 14px !important; right: 10px !important; z-index: 45 !important; }
-    #pomo-collapsed { padding: 5px 10px !important; font-size: 11px !important; }
-    #ai-floating-btn { bottom: 14px !important; left: 10px !important; padding: 8px 12px !important; font-size: 11px !important; z-index: 45 !important; }
+
+    /* تحويل الزرين العائمين لأيقونتين دائريتين مصغّرتين على الجوال */
+    #ai-floating-btn {
+        width: 44px !important;
+        height: 44px !important;
+        padding: 0 !important;
+        border-radius: 9999px !important;
+        justify-content: center !important;
+        bottom: 14px !important;
+        left: 10px !important;
+        z-index: 45 !important;
+    }
+    #ai-floating-btn .ai-btn-label { display: none !important; }
+
+    #med26-pomo-widget {
+        bottom: 14px !important;
+        right: 10px !important;
+        z-index: 45 !important;
+    }
+    #pomo-collapsed {
+        width: 44px !important;
+        height: 44px !important;
+        padding: 0 !important;
+        justify-content: center !important;
+        gap: 0 !important;
+        flex-direction: column !important;
+    }
+    #pomo-collapsed .pomo-mob-hide,
+    #pomo-quick-dismiss-btn { display: none !important; }
+    #pomo-mini-time {
+        font-size: 9px !important;
+        line-height: 1 !important;
+        margin-top: 1px;
+    }
+
+    /* رفع الأيقونتين تلقائياً فوق شريط التنقل السفلي أثناء حل الأسئلة */
+    body.in-trainer-view #ai-floating-btn,
+    body.in-trainer-view #med26-pomo-widget {
+        bottom: 70px !important;
+    }
+
     #custom-subjects { grid-template-columns: 1fr !important; }
     #f2-checklist-modal table { min-width: 680px !important; }
 }
 
-/* ================= تنظيم وتوسيط الشريط الأساسي في صفّين (مشابه للموقع الأول) ================= */
+/* ================= تنظيم وتوسيط الشريط الأساسي في صفّين ================= */
 #main-header > div {
     max-width: 1380px !important;
     width: 96% !important;
@@ -396,30 +644,44 @@ footer > div:last-child {
     max-width: none !important;
     flex: 1 1 0%;
 }
-#view-report > .app-card {
-    max-width: 100% !important;
-}
-#f2-checklist-modal > div {
-    max-width: 98vw !important;
-}
+#view-report > .app-card { max-width: 100% !important; }
+#f2-checklist-modal > div { max-width: 98vw !important; }
 
 /* عرض 4 بطاقات في الصف للأطلس على الشاشات العريضة */
 @media (min-width: 1536px) {
-    #atlas-grid {
-        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    #atlas-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+}
+/* ================= تثبيت شريط الأذكار ومنع اهتزاز الهيدر والصفحة ================= */
+.live-dhikr-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+#top-dhikr-pill {
+    width: 265px !important;
+    min-width: 265px !important;
+    max-width: 265px !important;
+    height: 36px !important;
+    flex: 0 0 265px !important;
+    overflow: hidden !important;
+}
+@media (min-width: 1380px) {
+    #top-dhikr-pill {
+        width: 310px !important;
+        min-width: 310px !important;
+        max-width: 310px !important;
+        flex: 0 0 310px !important;
     }
 }
-
-/* تبطئة حركة الشريط السفلي قليلاً لتناسب زيادة الآيات والأذكار */
-.footer-marquee-track {
-    animation-duration: 62s !important;
+@media (max-width: 1219px) {
+    #top-dhikr-pill { display: none !important; }
 }
 
-/* إصلاح اتجاه الآيات القرآنية والأذكار داخل الشريط السفلي المتحرك (منع انعكاس الأقواس) */
-.footer-marquee-track > div > span:not([dir="ltr"]) {
-    direction: rtl;
-    unicode-bidi: isolate;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
+/* حماية زر "موافق" في شاشة التحذير أثناء الوضع الفاتح */
+#disclaimer-modal button,
+body.light-mode #disclaimer-modal button,
+body.light-mode #disclaimer-modal .text-white {
+    color: #ffffff !important;
 }
