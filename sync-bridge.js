@@ -524,16 +524,16 @@
                 <div class="neutral-disc-card max-w-2xl w-full rounded-3xl px-5 py-7 sm:px-10 sm:py-10 text-center space-y-5 mx-auto relative">
                     <div class="w-14 h-14 mx-auto rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-2xl text-slate-800">🛡️</div>
                     <div class="inline-block px-3.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-xs font-extrabold">تنويه هام وإقرار استخدام داخلي</div>
-                    <div class="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-6 sm:px-7 sm:py-7 text-base sm:text-xl font-bold text-slate-800 leading-[2.1]">
+                    <div class="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-6 sm:px-7 sm:py-7 text-base sm:text-xl font-bold text-slate-800 leading-[2.25]">
                         <p>
                             أُعِدَّت هذه المنصة التدريبية من قِبَل <span class="font-black text-slate-950 underline decoration-slate-400 underline-offset-4">طلاب دفعة 26</span> ومُخصَّصةٌ <span class="font-black text-slate-950">حصراً للاستخدام الداخلي</span>،
                             <br class="hidden md:inline">
-                            و<span class="font-black text-red-700 bg-red-50 px-2 py-0.5 rounded-lg border border-red-200">يُحظر تماماً نشرها أو تداولها</span> مع <span class="font-black text-red-700">الدفعات الأخرى أو أي جهات خارجية</span>.
+                            و<span class="inline-block font-black text-red-700 bg-red-50 px-2.5 py-0.5 mx-1 my-1 rounded-lg border border-red-200 leading-normal">يُحظر تماماً نشرها أو تداولها</span> مع <span class="font-black text-red-700">الدفعات الأخرى أو أي جهات خارجية</span>.
                         </p>
                     </div>
                     ${usernameFieldHtml}
                     <div class="pt-1">
-                        <button type="button" onclick="acceptDisclaimer()" class="w-full sm:w-80 bg-slate-900 hover:bg-slate-800 text-white py-3.5 rounded-2xl text-base sm:text-lg font-black shadow-lg transition cursor-pointer">موافق</button>
+                        <button type="button" onclick="acceptDisclaimer()" style="color:#ffffff !important;" class="w-full sm:w-80 bg-slate-900 hover:bg-slate-800 text-white py-3.5 rounded-2xl text-base sm:text-lg font-black shadow-lg transition cursor-pointer">موافق</button>
                     </div>
                     <a id="stealth-disc-link" href="admin.html" class="stealth-admin-link">🔒 Admin</a>
                 </div>
@@ -762,8 +762,9 @@
             const qType = document.getElementById('custom-type')?.value || 'all';
             const highYieldOnly = !!document.getElementById('custom-highyield')?.checked;
 
+            const checkedSubjectsLow = checkedSubjects.map(s => String(s || '').trim().toLowerCase());
             return qArr.filter(q => {
-                if (!checkedSubjects.includes(q.subject)) return false;
+                if (!checkedSubjectsLow.includes(String(q.subject || '').trim().toLowerCase())) return false;
                 if (hasSubLabs) {
                     const qLabLow = (q.lab || '').toLowerCase();
                     const labId = typeof window.detectStationLabId === 'function' ? window.detectStationLabId(q) : null;
@@ -818,18 +819,23 @@
             const visibleLabs = (sub.labs || []).filter(l => !l.hidden);
             const numStr = String(sIdx + 1).padStart(2, '0');
 
-            const subQs = qArr.filter(q => q.subject === subName);
+            const subNameLow = subName.trim().toLowerCase();
+            const subQs = qArr.filter(q => String(q.subject || '').trim().toLowerCase() === subNameLow);
             const doneSub = subQs.filter(q => (typeof masteredIds !== 'undefined') && masteredIds.includes(q.id)).length;
             const subPct = subQs.length ? Math.round((doneSub / subQs.length) * 100) : 0;
 
             const labsHtml = visibleLabs.map((labObj, lIdx) => {
                 const labName = labObj.name;
-                const labQs = qArr.filter(q => q.subject === subName && (q.lab || '').includes(labName));
+                const labNameLow = labName.trim().toLowerCase();
+                const labQs = subQs.filter(q => {
+                    const qLabLow = String(q.lab || '').trim().toLowerCase();
+                    return qLabLow === labNameLow || (labNameLow && qLabLow.includes(labNameLow));
+                });
                 const doneLab = labQs.filter(q => (typeof masteredIds !== 'undefined') && masteredIds.includes(q.id)).length;
                 const labPct = labQs.length ? Math.round((doneLab / labQs.length) * 100) : 0;
                 const spanCls = (visibleLabs.length === 1 || (visibleLabs.length % 2 === 1 && lIdx === visibleLabs.length - 1)) ? 'sm:col-span-2' : '';
 
-                const clObj = labsArr.find(l => l.subject === subName && l.title === labName);
+                const clObj = labsArr.find(l => l.subject.trim().toLowerCase() === subNameLow && l.title.trim().toLowerCase() === labNameLow);
                 const isCheckedInCl = clObj && checklistData[clObj.id] && checklistData[clObj.id].study1;
 
                 let inlineStyle = '';
@@ -958,7 +964,7 @@
                 const query = (document.getElementById('atlas-search')?.value || '').toLowerCase().trim();
                 const filtered = getQuestionsArray().filter(q => {
                     if (!window.isQuestionVisibleInTrack(q)) return false;
-                    if (typeof currentAtlasFilter !== 'undefined' && currentAtlasFilter !== 'ALL' && q.subject !== currentAtlasFilter) return false;
+                    if (typeof currentAtlasFilter !== 'undefined' && currentAtlasFilter !== 'ALL' && String(q.subject || '').trim().toLowerCase() !== String(currentAtlasFilter).trim().toLowerCase()) return false;
                     if (query && !(q.q || '').toLowerCase().includes(query) && !(q.a || '').toLowerCase().includes(query) && !(q.lab || '').toLowerCase().includes(query)) return false;
                     return true;
                 });
@@ -1407,7 +1413,7 @@
                 textCol.classList.toggle('lg:col-span-12', hasNoSample);
             }
 
-            const subCfg = window.MED26_ALL_SUBJECTS.find(s => s.name === q.subject);
+            const subCfg = window.MED26_ALL_SUBJECTS.find(s => s.name.trim().toLowerCase() === String(q.subject || '').trim().toLowerCase());
             const subEl = document.getElementById('q-subject');
             if (subEl && subCfg && subCfg.color) {
                 const rgb = hexToRgbTuple(subCfg.color);
@@ -1448,7 +1454,7 @@
                 return;
             }
             if (opts.category === 'practice') {
-                const matches = trackQs.filter(q => q.category === 'practice' && (!opts.subject || q.subject === opts.subject) && (!opts.lab || (q.lab || '').includes(opts.lab)));
+                const matches = trackQs.filter(q => q.category === 'practice' && (!opts.subject || String(q.subject || '').trim().toLowerCase() === String(opts.subject).trim().toLowerCase()) && (!opts.lab || String(q.lab || '').trim().toLowerCase().includes(String(opts.lab).trim().toLowerCase())));
                 if (matches.length > 0) {
                     clearInterval(timerInterval); isExamSimulator = false; isBlitzMode = false; sessionResults = {}; sessionStartTime = Date.now();
                     currentList = matches; currentIndex = 0;
@@ -1475,12 +1481,12 @@
 
         const origSim = window.startExamSimulator;
         if (typeof origSim === 'function' && !origSim._v8Synced) {
-            window.startExamSimulator = function(customList = null, customTitle = null) {
-                try { mergeDynamicStationsInPlace(JSON.parse(localStorage.getItem('med26_dynamic_stations') || '[]')); } catch (e) {}
-                const pool = customList || getQuestionsArray().filter(window.isQuestionVisibleInTrack).sort(() => Math.random() - 0.5).slice(0, 18);
-                if (!pool.length) { alert('لا توجد أسئلة منشورة في هذا القسم لبدء المحاكي بعد!'); return; }
-                const title = customTitle || (IS_THEORY ? `⏱️ محاكي الاختبار النظري (${pool.length} سؤال • من 20 درجة)` : null);
-                const r = origSim.apply(this, [pool, title]);
+            window.startExamSimulator = function(customList = null, customTitle = null, vsOpts = null) {
+             try { mergeDynamicStationsInPlace(JSON.parse(localStorage.getItem('med26_dynamic_stations') || '[]')); } catch (e) {}
+             const pool = customList || getQuestionsArray().filter(window.isQuestionVisibleInTrack).sort(() => Math.random() - 0.5).slice(0, 18);
+             if (!pool.length) { alert('لا توجد أسئلة منشورة في هذا القسم لبدء المحاكي بعد!'); return; }
+             const title = customTitle || (IS_THEORY ? `⏱️ محاكي الاختبار النظري (${pool.length} سؤال • من 20 درجة)` : null);
+             const r = origSim.apply(this, [pool, title, vsOpts]);
                 if (IS_THEORY) setTimeout(applyTheoryVisualAndTerminologyPass, 40);
                 return r;
             };
