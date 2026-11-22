@@ -1069,7 +1069,10 @@ loadTransparentLogo();
 function rotateGlobalAdhkar() {
     currentDhikrIdx = (currentDhikrIdx + 1) % MED26_ADHKAR_LIST.length;
     const text = MED26_ADHKAR_LIST[currentDhikrIdx];
-    document.querySelectorAll('.live-dhikr-text').forEach(el => { el.innerText = text; });
+    document.querySelectorAll('.live-dhikr-text').forEach(el => {
+     el.innerText = text;
+     if (el.parentElement) el.parentElement.title = text;
+ });
 }
 setInterval(rotateGlobalAdhkar, 7000);
 
@@ -1467,7 +1470,7 @@ function renderAtlasGrid() {
     if (!Array.isArray(questionsDB) || !questionsDB.length) { renderAtlasSkeleton(grid); return; }
     const query = (document.getElementById('atlas-search')?.value || '').toLowerCase().trim(), seen = new Set();
     const filtered = questionsDB.filter(q => {
-        if (q.noSample || (currentAtlasFilter !== 'ALL' && q.subject !== currentAtlasFilter)) return false;
+        if (q.noSample || (currentAtlasFilter !== 'ALL' && String(q.subject || '').trim().toLowerCase() !== String(currentAtlasFilter).trim().toLowerCase())) return false;
         const key = `${q.page}_${q.slot}`; if (seen.has(key)) return false;
         const n = (personalNotes[q.id] || '').toLowerCase();
         if (query && !q.a.toLowerCase().includes(query) && !q.lab.toLowerCase().includes(query) && !q.q.toLowerCase().includes(query) && !n.includes(query)) return false;
@@ -1502,8 +1505,9 @@ function getCustomFilteredList() {
     const cat = document.querySelector('input[name="custom-cat"]:checked')?.value || 'all';
     const type = document.getElementById('custom-type')?.value || 'all';
     const hy = !!document.getElementById('custom-highyield')?.checked;
-    return questionsDB.filter(q => {
-        if (!subs.includes(q.subject)) return false;
+    const subsLow = subs.map(s => String(s || '').trim().toLowerCase());
+ return questionsDB.filter(q => {
+     if (!subsLow.includes(String(q.subject || '').trim().toLowerCase())) return false;
         if (cat !== 'all' && q.category !== cat) return false;
         if (q.category === 'compilation') {
             const rawY = String(q.year || q.badgeText || '');
@@ -1551,8 +1555,8 @@ function startTraining(opts = {}) {
     } else {
         currentList = questionsDB.filter(q => {
             if (opts.source === 'bookmarks') return bookmarkIds.includes(q.id);
-            if (opts.subject && q.subject !== opts.subject) return false;
-            if (opts.lab && !(q.lab || '').includes(opts.lab)) return false;
+            if (opts.subject && String(q.subject || '').trim().toLowerCase() !== String(opts.subject).trim().toLowerCase()) return false;
+         if (opts.lab && !String(q.lab || '').trim().toLowerCase().includes(String(opts.lab).trim().toLowerCase())) return false;
             if (opts.category && opts.category !== 'all' && q.category !== opts.category) return false;
             if (opts.year && q.year !== opts.year) return false;
             if (opts.highYield && !q.highYield) return false;
@@ -1888,8 +1892,20 @@ function finishOrExitSession() {
     Object.keys(sessionResults).length ? showWeaknessReport() : switchView('home');
 }
 
+function getTrackVisibleQuestions() {
+    const db = typeof questionsDB !== 'undefined' ? questionsDB : [];
+    if (typeof window.isQuestionVisibleInTrack === 'function') {
+        return db.filter(window.isQuestionVisibleInTrack);
+    }
+    const curTrack = document.body.dataset.track === 'theory' ? 'theory' : 'practical';
+    return db.filter(q => (q.track || 'practical') === curTrack);
+}
+
 function build1v1ChallengeUrl(includeMyResult = false) {
-    const list = currentList.length ? currentList : [...questionsDB].sort(() => Math.random() - 0.5).slice(0, 18);
+    const trackPool = getTrackVisibleQuestions();
+    const trackIds = new Set(trackPool.map(q => q.id));
+    const validCurrent = (Array.isArray(currentList) ? currentList : []).filter(q => q && trackIds.has(q.id));
+    const list = validCurrent.length ? validCurrent : [...trackPool].sort(() => Math.random() - 0.5).slice(0, Math.min(10, trackPool.length));
     const ids = list.map(q => q.id).join(',');
     let url = `${window.location.origin}${window.location.pathname}?challenge=${ids}`;
     if (includeMyResult && lastFinishedSessionSummary) {
@@ -2087,9 +2103,15 @@ function shareCurrentChallengeLink(includeMyScore = false) {
 }
 
 function createDirectFriendChallenge() {
-    const pool = [...questionsDB].sort(() => Math.random() - 0.5).slice(0, Math.min(10, questionsDB.length));
-    if (!pool.length) { alert('لا توجد أسئلة متاحة حالياً لبدء التحدي.'); return; }
-    startExamSimulator(pool, `⚔️ تحدي صاحبي 1v1 (${pool.length} محطة)`, { opponent: null, creatorMode: true });
+    const isTheory = document.body.dataset.track === 'theory';
+    const trackPool = getTrackVisibleQuestions();
+    const pool = [...trackPool].sort(() => Math.random() - 0.5).slice(0, Math.min(10, trackPool.length));
+    if (!pool.length) {
+        alert(isTheory ? 'لا توجد أسئلة نظري منشورة حالياً لبدء تحدي 1v1.' : 'لا توجد محطات عملي متاحة حالياً لبدء تحدي 1v1.');
+        return;
+    }
+    const unit = isTheory ? 'سؤال' : 'محطة';
+    startExamSimulator(pool, `⚔️ تحدي صاحبي 1v1 (${pool.length} ${unit})`, { opponent: null, creatorMode: true });
 }
 
 function printCustomPDF(mode = 'both') {
